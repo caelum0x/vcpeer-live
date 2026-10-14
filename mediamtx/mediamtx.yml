@@ -1,0 +1,51 @@
+# VCPeer Live - MediaMTX config (ingest + fan-out)
+#
+# Users publish once to rtmp://<host>:1935/live/<ingestKey> (OBS) or
+# POST a WHIP offer to http://<host>:8889/live/<ingestKey>/whip (browser,
+# no OBS). On the first track arriving, runOnReady runs fanout.sh, which
+# reads the control app's per-user destinations file from the shared
+# volume and pushes a `ffmpeg -c copy` passthrough (no re-encode) to
+# Owncast and to every enabled external RTMP(S) destination.
+#
+# Adopted, not hand-written: this is bluenviron/mediamtx's own
+# runOnReady hook mechanism (see deploy/RUNBOOK.md) - the only custom
+# code here is the ~30-line shell script that builds the ffmpeg command
+# lines from our data.
+
+logLevel: info
+logDestinations: [stdout]
+
+# RTMP ingest for OBS / any RTMP-capable encoder.
+rtmp: yes
+rtmpAddress: :1935
+
+# WHIP ingest for "go live from the browser" (no OBS needed).
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+webrtcICEServers2:
+  - url: stun:stun.l.google.com:19302
+# Published ICE host candidate(s) - set via the MTX_WEBRTCADDITIONALHOSTS
+# env var (docker-compose.yml), not hardcoded here. MediaMTX runs inside a
+# container whose own interface IP isn't reachable from outside the docker
+# network, so without this the browser's ICE handshake times out even
+# though the UDP port is published. Local proof uses 127.0.0.1 (matches
+# the host-mapped :8189/udp port below); a real deploy must set this to
+# the box's public IP/hostname instead (see deploy/RUNBOOK.md).
+
+# Not needed for this product - keep the attack surface small.
+rtsp: no
+hls: no
+srt: no
+
+api: yes
+apiAddress: :9997
+
+pathDefaults:
+  runOnAvailable: /scripts/fanout.sh
+  runOnAvailableRestart: no
+  runOnUnavailable: /scripts/fanout-stop.sh
+
+paths:
+  # Matches live/<ingestKey> for every user.
+  "~^live/.+$": {}

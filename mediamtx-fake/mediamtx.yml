@@ -1,0 +1,18 @@
+# Stand-in for "Twitch"/"Kick" in the local proof only - a second,
+# unmodified MediaMTX instance that just accepts any RTMP publish, so we
+# can prove the real MediaMTX's fanout actually reaches an external-looking
+# RTMP server. Not part of the production topology (deploy/RUNBOOK.md
+# pushes straight to the real Twitch/Kick/YouTube ingest URLs the user
+# enters in the control UI).
+logLevel: info
+rtmp: yes
+rtmpAddress: :1935
+rtsp: no
+hls: no
+webrtc: no
+srt: no
+api: yes
+apiAddress: :9997
+
+paths:
+  all_others: {}

@@ -1,0 +1,109 @@
+version: "3.9"
+
+# VCPeer Live - free multistream (go live once, broadcast to Twitch, Kick
+# and YouTube at the same time) plus a watch page with chat.
+#
+# Composed from off-the-shelf OSS, not hand-written:
+#   - owncast/owncast (MIT)      -> watch page + chat + HLS passthrough
+#   - bluenviron/mediamtx (MIT)  -> RTMP/WHIP ingest + fan-out to user
+#                                    destinations (ffmpeg -c copy, no
+#                                    transcoding)
+#   - control app (this repo's only new code) -> auth, destinations CRUD,
+#     encrypted stream keys, credentials, go-live, status
+#
+# mediamtx-fake is local-proof-only: a second MediaMTX standing in for
+# Twitch/Kick so the fanout can be verified end-to-end without touching
+# real accounts. Remove that service for any real deploy - see
+# deploy/RUNBOOK.md.
+
+services:
+  owncast:
+    image: owncast/owncast:latest
+    restart: unless-stopped
+    ports:
+      - "${OWNCAST_WEB_PORT:-8080}:8080"
+      - "${OWNCAST_RTMP_PORT:-1937}:1935"
+    volumes:
+      - owncast-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  owncast-init:
+    image: curlimages/curl:8.9.1
+    depends_on:
+      owncast:
+        condition: service_healthy
+    environment:
+      OWNCAST_HOST: "owncast:8080"
+      OWNCAST_ADMIN_PASSWORD: "${OWNCAST_ADMIN_PASSWORD:-abc123}"
+      OWNCAST_STREAM_KEY: "${OWNCAST_STREAM_KEY:-abc123}"
+    volumes:
+      - ./owncast/init.sh:/init.sh:ro
+    entrypoint: ["sh", "/init.sh"]
+    restart: "no"
+
+  mediamtx:
+    build: ./mediamtx
+    restart: unless-stopped
+    depends_on:
+      - owncast
+    ports:
+      - "${MEDIAMTX_RTMP_PORT:-1935}:1935" # OBS / RTMP ingest
+      - "${MEDIAMTX_WHIP_PORT:-8889}:8889" # browser WHIP ingest (HTTP)
+      - "${MEDIAMTX_WHIP_UDP_PORT:-8189}:8189/udp"
+      - "${MEDIAMTX_API_PORT:-9997}:9997"
+    environment:
+      FANOUT_SHARED_DIR: /shared
+      OWNCAST_STREAM_KEY: "${OWNCAST_STREAM_KEY:-abc123}"
+      # MediaMTX's native env-override mechanism (MTX_<FIELD> for any
+      # mediamtx.yml field) - not string-templated into the yaml file,
+      # which MediaMTX does not support for list fields.
+      MTX_WEBRTCADDITIONALHOSTS: "${MEDIAMTX_WEBRTC_HOST:-127.0.0.1}"
+    volumes:
+      - fanout-shared:/shared
+
+  control:
+    build: ./control
+    restart: unless-stopped
+    depends_on:
+      - mediamtx
+    ports:
+      - "${CONTROL_PORT:-4000}:4000"
+    environment:
+      PORT: 4000
+      VCPEER_LIVE_ENV: "${VCPEER_LIVE_ENV:-dev}"
+      PUBLIC_URL: "${PUBLIC_URL:-http://localhost:4000}"
+      RTMP_PUBLIC_URL: "${RTMP_PUBLIC_URL:-rtmp://localhost:1935}"
+      WHIP_PUBLIC_URL: "${WHIP_PUBLIC_URL:-http://localhost:8889}"
+      OWNCAST_PUBLIC_URL: "${OWNCAST_PUBLIC_URL:-http://localhost:8080}"
+      OWNCAST_STREAM_KEY: "${OWNCAST_STREAM_KEY:-abc123}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
+      DATA_FILE: /data/db.json
+      FANOUT_SHARED_DIR: /shared
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASS: "${SMTP_PASS:-}"
+      SMTP_FROM: "${SMTP_FROM:-VCPeer Live <live@vcpeer.com>}"
+    volumes:
+      - control-data:/data
+      - fanout-shared:/shared
+
+  # Local-proof-only "fake Twitch/Kick" - see header comment above.
+  mediamtx-fake:
+    image: bluenviron/mediamtx:latest
+    restart: unless-stopped
+    profiles: ["proof"]
+    ports:
+      - "${MEDIAMTX_FAKE_RTMP_PORT:-1936}:1935"
+      - "${MEDIAMTX_FAKE_API_PORT:-9998}:9997"
+    volumes:
+      - ./mediamtx-fake/mediamtx.yml:/mediamtx.yml:ro
+
+volumes:
+  owncast-data:
+  control-data:
+  fanout-shared:

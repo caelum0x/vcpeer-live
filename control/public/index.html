@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VCPeer Live — Stream to Twitch, Kick and YouTube at the same time, free</title>
+    <meta
+        name="description"
+        content="Free multistream: go live once and broadcast to Twitch, Kick and YouTube at the same time. Includes a free watch page with chat. No OBS required — go live from your browser."
+    />
+    <link rel="stylesheet" href="/css/_tokens.css" />
+    <link rel="stylesheet" href="/css/live.css" />
+</head>
+<body>
+    <div class="auth-wrap">
+        <div class="auth-card">
+            <h1>VCPeer Live</h1>
+            <p>
+                Free multistream to Twitch, Kick and YouTube at once, plus a watch page with
+                chat at vcpeer.com. The restream alternative that stays free.
+            </p>
+            <form id="requestLinkForm">
+                <input type="email" id="email" placeholder="you@example.com" required autocomplete="email" />
+                <button type="submit" class="btn btn-primary">Send sign-in link</button>
+            </form>
+            <div id="message" style="margin-top: 16px; font-size: 0.85rem; color: var(--ds-neutral-300);"></div>
+            <div id="devLinkBox" class="dev-link" style="display: none;"></div>
+        </div>
+    </div>
+
+    <div class="live-main" style="max-width: 640px;">
+        <div class="card seo-copy">
+            <h2 style="color: var(--ds-neutral-0);">Stream to Twitch and Kick at the same time, free</h2>
+            <p>
+                VCPeer Live is a free multistream tool: connect once with OBS or straight from
+                your browser, and we fan your stream out to every destination you add — Twitch,
+                Kick, YouTube or any custom RTMP(S) endpoint — with no transcoding and no per-destination
+                re-encode. It's a free restream alternative built for streamers who don't want
+                a subscription just to go live in two places.
+            </p>
+            <p>
+                Every stream also gets a watch page with live chat at vcpeer.com, so you have a
+                destination you fully own even when the platforms change their rules.
+            </p>
+        </div>
+    </div>
+
+    <script src="/js/landing.js"></script>
+</body>
+</html>

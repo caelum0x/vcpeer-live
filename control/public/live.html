@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Go live — VCPeer Live</title>
+    <meta name="robots" content="noindex" />
+    <link rel="stylesheet" href="/css/_tokens.css" />
+    <link rel="stylesheet" href="/css/live.css" />
+</head>
+<body>
+    <div class="live-shell">
+        <header class="live-topbar">
+            <a href="/" class="live-brand"><span class="dot"></span> VCPeer Live</a>
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <span id="statusPill" class="status-pill"><span class="dot"></span> Offline</span>
+                <button id="logoutBtn" class="btn btn-ghost">Sign out</button>
+            </div>
+        </header>
+
+        <main class="live-main">
+            <section class="card">
+                <h2>Go live from OBS</h2>
+                <p class="hint">Paste this server and stream key into OBS (Settings → Stream → Custom).</p>
+                <div class="credential-row">
+                    <label>Server</label>
+                    <code id="rtmpUrl">loading…</code>
+                    <button class="btn btn-copy" data-copy="rtmpUrl">Copy</button>
+                </div>
+                <div style="margin-top: 20px;">
+                    <button id="goLiveBtn" class="btn btn-primary">Arm destinations</button>
+                    <button id="browserGoLiveBtn" class="btn btn-ghost" style="margin-left: 12px;">
+                        Go live from browser
+                    </button>
+                </div>
+                <video id="browserPreview" style="display: none; width: 100%; max-width: 360px; margin-top: 16px; border-radius: 10px; background: #000;" autoplay muted playsinline></video>
+            </section>
+
+            <section class="card">
+                <h2>Destinations</h2>
+                <p class="hint">Add Twitch, Kick, YouTube or any custom RTMP(S) endpoint. Stream keys are encrypted at rest and never shown again.</p>
+                <div id="destinationList" class="destination-list">
+                    <div class="empty-state">No destinations yet — add your first one below.</div>
+                </div>
+
+                <form id="addDestinationForm" class="form-grid">
+                    <div class="field">
+                        <label for="platform">Platform</label>
+                        <select id="platform">
+                            <option value="twitch">Twitch</option>
+                            <option value="kick">Kick</option>
+                            <option value="youtube">YouTube</option>
+                            <option value="custom">Custom RTMP(S)</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="label">Label</label>
+                        <input id="label" placeholder="My Twitch channel" required />
+                    </div>
+                    <div class="field full">
+                        <label for="rtmpUrl2">RTMP(S) server URL</label>
+                        <input id="rtmpUrl2" placeholder="rtmp://live.twitch.tv/app" required />
+                    </div>
+                    <div class="field full">
+                        <label for="streamKey">Stream key</label>
+                        <input id="streamKey" type="password" placeholder="never shown again after saving" required />
+                    </div>
+                    <div class="field full">
+                        <button type="submit" class="btn btn-primary">Add destination</button>
+                    </div>
+                </form>
+            </section>
+
+            <section class="card">
+                <h2>Watch page</h2>
+                <p class="hint">Every stream also plays here with live chat — no transcoding, straight passthrough.</p>
+                <div class="credential-row">
+                    <label>Watch URL</label>
+                    <code id="watchUrl">loading…</code>
+                    <button class="btn btn-copy" data-copy="watchUrl">Copy</button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="/js/whip.js"></script>
+    <script src="/js/live.js"></script>
+</body>
+</html>

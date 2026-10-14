@@ -1,0 +1,20 @@
+{
+  "name": "vcpeer-live-control",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Control app for VCPeer Live - free multistream to Twitch, Kick and YouTube",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2",
+    "nodemailer": "^6.9.14"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
