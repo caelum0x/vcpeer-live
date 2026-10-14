@@ -28,7 +28,16 @@ sep=""
 while IFS='|' read -r platform label target; do
   [ -z "$platform" ] && continue
   echo "fanout: pushing $MTX_PATH -> $platform ($label)"
-  ffmpeg -nostdin -loglevel warning -re -i "$SOURCE_URL" -c copy -f flv "$target" \
+  # analyzeduration/probesize: without these, ffmpeg's RTMP demuxer can give
+  # up on finding H.264 codec params (SPS/PPS) within its default live-input
+  # analyze window, especially moments after MediaMTX's runOnReady fires -
+  # this self-read starts reading the just-published stream from nearly its
+  # first byte. A failed probe here surfaces downstream as a misleading
+  # "Cannot open connection" error when opening the destination, not as an
+  # input error, since -c copy needs valid extradata before it can write
+  # any output header at all.
+  ffmpeg -nostdin -loglevel warning -analyzeduration 2000000 -probesize 2000000 \
+    -re -i "$SOURCE_URL" -c copy -f flv "$target" \
     >>"$SHARED_DIR/${INGEST_KEY}.${platform}.log" 2>&1 &
   echo "$!" >> "$PID_FILE"
   names="${names}${sep}\"${platform}\""

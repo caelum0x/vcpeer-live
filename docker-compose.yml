@@ -20,6 +20,15 @@ services:
   owncast:
     image: owncast/owncast:latest
     restart: unless-stopped
+    # -adminpassword/-streamkey (owncast's own CLI flags, see `owncast --help`)
+    # set the server's REAL admin password + stream key at boot so they match
+    # OWNCAST_ADMIN_PASSWORD/OWNCAST_STREAM_KEY from the start - without this,
+    # owncast-init's REST calls below would try to authenticate with a new
+    # OWNCAST_ADMIN_PASSWORD against a server still on Owncast's built-in
+    # default ("abc123"), which never matches once that default is changed.
+    command:
+      - "-adminpassword=${OWNCAST_ADMIN_PASSWORD:-abc123}"
+      - "-streamkey=${OWNCAST_STREAM_KEY:-abc123}"
     ports:
       - "${OWNCAST_WEB_PORT:-8080}:8080"
       - "${OWNCAST_RTMP_PORT:-1937}:1935"
