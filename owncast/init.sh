@@ -11,6 +11,7 @@ HOST="${OWNCAST_HOST:-owncast:8080}"
 USER="admin"
 PASS="${OWNCAST_ADMIN_PASSWORD:-abc123}"
 STREAM_KEY="${OWNCAST_STREAM_KEY:-abc123}"
+LOGO_FILE="${OWNCAST_LOGO_FILE:-/logo.png}"
 
 echo "owncast-init: waiting for $HOST ..."
 i=0
@@ -34,5 +35,63 @@ curl -sf -u "$USER:$PASS" -X POST -H "Content-Type: application/json" \
   -d "{\"value\":[{\"key\":\"$STREAM_KEY\",\"comment\":\"vcpeer-live fanout\"}]}" \
   "http://$HOST/api/admin/config/streamkeys" \
   || echo "owncast-init: WARNING - could not set stream key, using the server's existing default"
+
+# Replace Owncast's own stock branding (name "New Owncast Server", a
+# welcome blurb linking to owncast.online/owncast.directory, and a demo
+# video from Owncast's CDN) with VCPeer Live branding. Without this the
+# public watch page - which does get real traffic since it's linked from
+# vcpeer.com - advertises the upstream OSS project instead of VCPeer.
+echo "owncast-init: setting server name"
+curl -sf -u "$USER:$PASS" -X POST -H "Content-Type: application/json" \
+  -d '{"value":"VCPeer Live"}' \
+  "http://$HOST/api/admin/config/name" \
+  || echo "owncast-init: WARNING - could not set server name"
+
+echo "owncast-init: setting server summary"
+curl -sf -u "$USER:$PASS" -X POST -H "Content-Type: application/json" \
+  -d '{"value":"Free multistream watch page - part of VCPeer (vcpeer.com): free video calls, file sharing, scheduling and live streaming."}' \
+  "http://$HOST/api/admin/config/serversummary" \
+  || echo "owncast-init: WARNING - could not set server summary"
+
+echo "owncast-init: setting stream title"
+curl -sf -u "$USER:$PASS" -X POST -H "Content-Type: application/json" \
+  -d '{"value":"Live on VCPeer"}' \
+  "http://$HOST/api/admin/config/streamtitle" \
+  || echo "owncast-init: WARNING - could not set stream title"
+
+echo "owncast-init: setting tags"
+curl -sf -u "$USER:$PASS" -X POST -H "Content-Type: application/json" \
+  -d '{"value":["vcpeer","multistream","live"]}' \
+  "http://$HOST/api/admin/config/tags" \
+  || echo "owncast-init: WARNING - could not set tags"
+
+echo "owncast-init: setting social handles"
+curl -sf -u "$USER:$PASS" -X POST -H "Content-Type: application/json" \
+  -d '{"value":[{"platform":"website","url":"https://vcpeer.com"}]}' \
+  "http://$HOST/api/admin/config/socialhandles" \
+  || echo "owncast-init: WARNING - could not set social handles"
+
+echo "owncast-init: setting offline message"
+curl -sf -u "$USER:$PASS" -X POST -H "Content-Type: application/json" \
+  -d '{"value":"This stream is offline right now. Go live free at https://vcpeer.com/live"}' \
+  "http://$HOST/api/admin/config/offlinemessage" \
+  || echo "owncast-init: WARNING - could not set offline message"
+
+echo "owncast-init: replacing page content"
+curl -sf -u "$USER:$PASS" -X POST -H "Content-Type: application/json" \
+  -d '{"value":"Watch page for VCPeer Live - free multistream to Twitch, Kick and YouTube at the same time, no OBS required. Go live free at https://vcpeer.com/live."}' \
+  "http://$HOST/api/admin/config/pagecontent" \
+  || echo "owncast-init: WARNING - could not set page content"
+
+if [ -f "$LOGO_FILE" ]; then
+  echo "owncast-init: setting logo"
+  LOGO_B64=$(base64 "$LOGO_FILE" | tr -d '\n')
+  curl -sf -u "$USER:$PASS" -X POST -H "Content-Type: application/json" \
+    -d "{\"value\":\"data:image/png;base64,$LOGO_B64\"}" \
+    "http://$HOST/api/admin/config/logo" \
+    || echo "owncast-init: WARNING - could not set logo"
+else
+  echo "owncast-init: WARNING - $LOGO_FILE not found, leaving Owncast's default logo"
+fi
 
 echo "owncast-init: done"

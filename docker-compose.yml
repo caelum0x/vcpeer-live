@@ -51,6 +51,7 @@ services:
       OWNCAST_STREAM_KEY: "${OWNCAST_STREAM_KEY:-abc123}"
     volumes:
       - ./owncast/init.sh:/init.sh:ro
+      - ./owncast/logo.png:/logo.png:ro
     entrypoint: ["sh", "/init.sh"]
     restart: "no"
 
