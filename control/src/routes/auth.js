@@ -3,9 +3,9 @@
 const express = require('express');
 const { requestMagicLink, consumeMagicLink, SESSION_TTL_MS } = require('../lib/auth');
 const { isValidEmail } = require('../lib/validate');
-const { sendMagicLinkEmail } = require('../lib/mailer');
+const { sendMagicLinkEmail: sendMagicLinkEmailViaSmtp } = require('../lib/mailer');
 
-function buildAuthRouter(store, { publicUrl, isDev }) {
+function buildAuthRouter(store, { publicUrl, isDev, sendMagicLinkEmail = sendMagicLinkEmailViaSmtp }) {
   const router = express.Router();
 
   router.post('/request-link', async (req, res) => {
@@ -24,13 +24,27 @@ function buildAuthRouter(store, { publicUrl, isDev }) {
     const link = `${publicUrl}/api/auth/callback?token=${issuedToken}`;
     const mailResult = await sendMagicLinkEmail({ to: email, link });
 
-    const response = { ok: true, message: 'Check your email for a sign-in link.' };
     // Dev-only convenience so local proof runs don't need a working SMTP
     // relay: the link is only ever echoed back when VCPEER_LIVE_ENV=dev.
     if (isDev && !mailResult.sent) {
-      response.devLink = link;
+      return res.json({ ok: true, message: 'Check your email for a sign-in link.', devLink: link });
     }
-    return res.json(response);
+
+    // Never silently report "check your email" when the email was not
+    // actually sent (SMTP misconfigured, relay rejected it, shared mail
+    // quota exhausted, etc.) - that leaves the visitor waiting on a link
+    // that is never coming, with no way to know why. The issued token
+    // stays valid for its full TTL, so a retried request or the existing
+    // link (once delivery recovers) still works.
+    if (!mailResult.sent) {
+      console.error(`vcpeer-live auth: sign-in email not delivered (${mailResult.reason})`);
+      return res.status(502).json({
+        ok: false,
+        error: 'We could not send the sign-in email right now. Please try again in a few minutes.',
+      });
+    }
+
+    return res.json({ ok: true, message: 'Check your email for a sign-in link.' });
   });
 
   router.get('/callback', (req, res) => {
