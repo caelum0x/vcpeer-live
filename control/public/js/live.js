@@ -165,6 +165,25 @@
     }
 
     try {
+      // "Go live from browser" is a separate ingest path from OBS/RTMP
+      // (WHIP straight into MediaMTX), but it still needs the SAME arming
+      // step the "Arm destinations" button performs: MediaMTX's
+      // runOnReady hook (fanout.sh) only pushes to Owncast/Twitch/Kick/etc
+      // if the destinations file it reads has already been written by
+      // POST /api/live/go. Without this call, WHIP publish still succeeds
+      // and /api/live/status still flips to "live" (MediaMTX really is
+      // receiving the stream) while fanout.sh silently exits with nothing
+      // armed yet - the broadcaster would see "Live" and no viewer would
+      // ever see anything, with no error anywhere. Previously this
+      // button skipped straight to getUserMedia()/WHIP publish and never
+      // called /api/live/go at all.
+      const goRes = await api('/api/live/go', { method: 'POST' });
+      const goData = await goRes.json();
+      if (!goRes.ok) {
+        showToast(goData.error || 'Could not arm destinations.');
+        return;
+      }
+
       const creds = await (await api('/api/live/credentials')).json();
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       preview.srcObject = localStream;
@@ -173,7 +192,7 @@
       whip = new WhipPublisher(creds.whipUrl);
       await whip.publish(localStream);
       btn.textContent = 'Stop browser broadcast';
-      showToast('Broadcasting from browser via WHIP.');
+      showToast(`Broadcasting from browser via WHIP. Armed ${goData.destinationsArmed} destination(s).`);
     } catch (err) {
       showToast('Could not start browser broadcast: ' + err.message);
     }
