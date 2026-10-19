@@ -5,3 +5,4 @@ control/data/
 *.log
 .DS_Store
 /tmp/
+.gstack/
