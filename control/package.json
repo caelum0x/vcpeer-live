@@ -12,7 +12,7 @@
   "dependencies": {
     "cookie-parser": "^1.4.6",
     "express": "^4.19.2",
-    "nodemailer": "^6.9.14"
+    "nodemailer": "^10.1.7"
   },
   "engines": {
     "node": ">=20"
