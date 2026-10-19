@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /live
+
+Sitemap: https://live.vcpeer.com/sitemap.xml
