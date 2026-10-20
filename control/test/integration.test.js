@@ -158,7 +158,7 @@ test('go-live writes a fanout file with the owncast target and only enabled, dec
     const goRes = await fetch(`${base}/api/live/go`, { method: 'POST', headers: { Cookie: cookie } });
     assert.equal(goRes.status, 200);
     const goBody = await goRes.json();
-    assert.equal(goBody.destinationsArmed, 2); // owncast + the one enabled destination
+    assert.equal(goBody.destinationsArmed, 1); // Owncast is always armed and must not be counted; only the one enabled custom destination is
 
     const files = fs.readdirSync(sharedDir).filter((f) => f.endsWith('.destinations'));
     assert.equal(files.length, 1);

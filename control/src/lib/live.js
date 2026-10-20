@@ -28,16 +28,21 @@ function getOrCreateIngestKey(data, userId) {
  */
 function writeFanoutFile({ sharedDir, ingestKey, ownCastStreamKey, destinations, encryptionKey }) {
   const lines = [`owncast|Owncast|rtmp://owncast:1935/live/${ownCastStreamKey}`];
+  let armedCount = 0;
   for (const dest of destinations) {
     if (!dest.enabled) continue;
     const plainKey = decryptStreamKey(dest.encryptedKey, encryptionKey);
     const base = dest.rtmpUrl.endsWith('/') ? dest.rtmpUrl.slice(0, -1) : dest.rtmpUrl;
     lines.push(`${dest.platform}|${dest.label}|${base}/${plainKey}`);
+    armedCount += 1;
   }
   if (!fs.existsSync(sharedDir)) fs.mkdirSync(sharedDir, { recursive: true });
   const file = path.join(sharedDir, `${ingestKey}.destinations`);
   fs.writeFileSync(file, `${lines.join('\n')}\n`, { mode: 0o600 });
-  return { file, count: lines.length };
+  // `armedCount` is the user's own configured destinations only - Owncast
+  // is always armed and isn't something the user configured, so it must
+  // never be counted in the number shown back to them (see routes/live.js).
+  return { file, count: lines.length, armedCount };
 }
 
 /** Reads MediaMTX's status file (written by fanout.sh) for a given ingest key, if present. */

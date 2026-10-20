@@ -34,13 +34,13 @@ function buildLiveRouter(store, { rtmpPublicUrl, whipPublicUrl, sharedDir, ownCa
 
     const mine = data.destinations.filter((d) => d.userId === req.user.id);
     try {
-      const { count } = writeFanoutFile({
+      const { armedCount } = writeFanoutFile({
         sharedDir,
         ingestKey,
         ownCastStreamKey,
         destinations: mine,
       });
-      return res.json({ ok: true, destinationsArmed: count, ingestKey });
+      return res.json({ ok: true, destinationsArmed: armedCount, ingestKey });
     } catch (err) {
       console.error('vcpeer-live: failed to write fanout file:', err.message);
       return res.status(500).json({ error: 'failed to arm destinations' });
