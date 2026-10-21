@@ -16,6 +16,25 @@ function getOrCreateIngestKey(data, userId) {
 }
 
 /**
+ * Replaces a user's ingest key with a freshly generated one. The ingest
+ * key doubles as the only thing standing between "anyone who has it" and
+ * "can publish to this user's armed destinations" - MediaMTX itself
+ * accepts any RTMP/WHIP publish whose path matches `live/<anything>`; the
+ * control app never validates publishers at connect time. If a key leaks
+ * (shared on screen during an OBS setup stream, pasted somewhere public,
+ * etc.) the user needs a way to invalidate it, same as rotating any other
+ * exposed secret. Returns a NEW store object; never mutates the input.
+ * `oldKey` is null (not an error) when the user never had one yet.
+ */
+function regenerateIngestKey(data, userId) {
+  const existing = data.ingestKeys.find((k) => k.userId === userId);
+  const newKey = crypto.randomBytes(12).toString('hex');
+  const withoutOld = data.ingestKeys.filter((k) => k.userId !== userId);
+  const next = { ...data, ingestKeys: [...withoutOld, { userId, key: newKey }] };
+  return { data: next, oldKey: existing ? existing.key : null, newKey };
+}
+
+/**
  * Writes the fan-out instructions MediaMTX's runOnReady hook (fanout.sh)
  * reads when a user's stream goes live. Pipe-delimited, not JSON - the
  * MediaMTX container is minimal (ffmpeg added, no JSON tooling) and this
@@ -56,4 +75,31 @@ function readFanoutStatus({ sharedDir, ingestKey }) {
   }
 }
 
-module.exports = { getOrCreateIngestKey, writeFanoutFile, readFanoutStatus };
+/**
+ * Deletes every file fanout.sh/the control app ever wrote for a given
+ * ingest key (the `.destinations` config, `.status`, `.pids`, and any
+ * per-platform `.log` files) from the shared volume. Called after
+ * rotating a key so a captured old key is fully dead - without this, a
+ * key that was already armed (its `.destinations` file written by a
+ * prior POST /api/live/go) would still work for fan-out purposes even
+ * after the control app "forgot" it, since fanout.sh reads straight off
+ * disk and never asks the control app whether a key is still current.
+ * A no-op (not an error) if the shared dir or the files don't exist.
+ */
+function removeFanoutArtifacts({ sharedDir, ingestKey }) {
+  if (!ingestKey || !fs.existsSync(sharedDir)) return;
+  const prefix = `${ingestKey}.`;
+  for (const name of fs.readdirSync(sharedDir)) {
+    if (name.startsWith(prefix)) {
+      fs.rmSync(path.join(sharedDir, name), { force: true });
+    }
+  }
+}
+
+module.exports = {
+  getOrCreateIngestKey,
+  regenerateIngestKey,
+  writeFanoutFile,
+  readFanoutStatus,
+  removeFanoutArtifacts,
+};

@@ -57,6 +57,10 @@ async function signIn(base) {
   return setCookie.split(';')[0];
 }
 
+function getCredentials(base, cookie) {
+  return fetch(`${base}/api/live/credentials`, { headers: { Cookie: cookie } });
+}
+
 test('unauthenticated requests to protected routes are rejected', async () => {
   await withServer(async (base) => {
     const res = await fetch(`${base}/api/destinations`);
@@ -313,6 +317,47 @@ test('sign-in rate limits are scoped per email, not a global lockout for everyon
     },
     { authRateLimiters }
   );
+});
+
+test('regenerating the ingest key issues a new one and kills the old key\'s armed fanout file', async () => {
+  await withServer(async (base, sharedDir) => {
+    const cookie = await signIn(base);
+
+    const before = await (await getCredentials(base, cookie)).json();
+    const oldIngestKey = new URL(before.rtmpUrl.replace('rtmp://', 'http://')).pathname.split('/').pop();
+
+    await fetch(`${base}/api/destinations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({
+        platform: 'custom',
+        label: 'Fake Twitch (local)',
+        rtmpUrl: 'rtmp://mediamtx-fake:1935/twitch',
+        streamKey: 'fake-twitch-key-123',
+      }),
+    });
+    await fetch(`${base}/api/live/go`, { method: 'POST', headers: { Cookie: cookie } });
+
+    const armedFile = path.join(sharedDir, `${oldIngestKey}.destinations`);
+    assert.ok(fs.existsSync(armedFile), 'armed fanout file for the old key should exist before rotation');
+
+    const regenRes = await fetch(`${base}/api/live/credentials/regenerate`, {
+      method: 'POST',
+      headers: { Cookie: cookie },
+    });
+    assert.equal(regenRes.status, 200);
+    const after = await regenRes.json();
+    assert.notEqual(after.rtmpUrl, before.rtmpUrl);
+
+    // The old key's on-disk fanout config must be gone, not just
+    // forgotten by the control app - otherwise anyone who already had
+    // the leaked old key could still publish and reach the user's real
+    // destinations.
+    assert.ok(!fs.existsSync(armedFile), 'the old key\'s armed fanout file must be deleted on rotation');
+
+    const latest = await (await getCredentials(base, cookie)).json();
+    assert.equal(latest.rtmpUrl, after.rtmpUrl, 'GET /credentials must reflect the rotated key afterwards');
+  });
 });
 
 test('destination lifecycle: toggle and delete', async () => {

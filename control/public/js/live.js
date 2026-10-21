@@ -198,6 +198,23 @@
     }
   });
 
+  document.getElementById('regenerateKeyBtn').addEventListener('click', async () => {
+    const confirmed = window.confirm(
+      'Regenerate your stream key? The current server/key stops working immediately - ' +
+        'you will need to update OBS (or the browser go-live page) with the new one.'
+    );
+    if (!confirmed) return;
+    const res = await api('/api/live/credentials/regenerate', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Could not regenerate the stream key.');
+      return;
+    }
+    document.getElementById('rtmpUrl').textContent = data.rtmpUrl;
+    document.getElementById('watchUrl').textContent = data.watchUrl;
+    showToast('Stream key regenerated. The old one no longer works - update OBS with the new server URL above.');
+  });
+
   document.getElementById('logoutBtn').addEventListener('click', async () => {
     await api('/api/auth/logout', { method: 'POST' });
     window.location.href = '/';
