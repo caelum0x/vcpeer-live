@@ -187,6 +187,81 @@ test('go-live writes a fanout file with the owncast target and only enabled, dec
   });
 });
 
+test('listing destinations shows each one\'s real last-4 key mask, not an identical placeholder', async () => {
+  await withServer(async (base) => {
+    const cookie = await signIn(base);
+
+    await fetch(`${base}/api/destinations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({
+        platform: 'twitch',
+        label: 'My Twitch',
+        rtmpUrl: 'rtmp://live.twitch.tv/app',
+        streamKey: 'twitch_secret_aaaa',
+      }),
+    });
+    await fetch(`${base}/api/destinations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({
+        platform: 'kick',
+        label: 'My Kick',
+        rtmpUrl: 'rtmp://fa723fc1b171.global-contribute.kick.com/app',
+        streamKey: 'kick_secret_bbbb',
+      }),
+    });
+
+    const listRes = await fetch(`${base}/api/destinations`, { headers: { Cookie: cookie } });
+    assert.equal(listRes.status, 200);
+    const { destinations } = await listRes.json();
+    assert.equal(destinations.length, 2);
+
+    const serialized = JSON.stringify(destinations);
+    assert.ok(!serialized.includes('twitch_secret_aaaa'));
+    assert.ok(!serialized.includes('kick_secret_bbbb'));
+
+    const twitch = destinations.find((d) => d.platform === 'twitch');
+    const kick = destinations.find((d) => d.platform === 'kick');
+    // Each destination's own real key must be distinguishable on reload -
+    // a fixed "********" placeholder for every row defeats the purpose of
+    // showing a mask at all (can't tell which stored key is which).
+    assert.ok(twitch.streamKeyMasked.endsWith('aaaa'));
+    assert.ok(kick.streamKeyMasked.endsWith('bbbb'));
+    assert.notEqual(twitch.streamKeyMasked, kick.streamKeyMasked);
+  });
+});
+
+test('updating a destination without changing its key still returns the real mask, not a blank placeholder', async () => {
+  await withServer(async (base) => {
+    const cookie = await signIn(base);
+
+    const createRes = await fetch(`${base}/api/destinations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({
+        platform: 'twitch',
+        label: 'My Twitch',
+        rtmpUrl: 'rtmp://live.twitch.tv/app',
+        streamKey: 'twitch_secret_cccc',
+      }),
+    });
+    const created = await createRes.json();
+    assert.ok(created.streamKeyMasked.endsWith('cccc'));
+
+    // Rename only - streamKey is intentionally omitted from this request.
+    const renameRes = await fetch(`${base}/api/destinations/${created.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ label: 'My Twitch (renamed)' }),
+    });
+    assert.equal(renameRes.status, 200);
+    const renamed = await renameRes.json();
+    assert.equal(renamed.label, 'My Twitch (renamed)');
+    assert.ok(renamed.streamKeyMasked.endsWith('cccc'));
+  });
+});
+
 test('destination lifecycle: toggle and delete', async () => {
   await withServer(async (base) => {
     const cookie = await signIn(base);

@@ -5,7 +5,7 @@ const express = require('express');
 
 const { requireAuth } = require('../lib/auth');
 const { validateDestination } = require('../lib/validate');
-const { encryptStreamKey, maskStreamKey } = require('../lib/crypto');
+const { encryptStreamKey, decryptStreamKey, maskStreamKey } = require('../lib/crypto');
 
 function toPublicDestination(dest, plainKeyForMasking) {
   // Never return the encrypted payload or any derivable secret - only a
@@ -29,17 +29,21 @@ function buildDestinationsRouter(store) {
   router.get('/', (req, res) => {
     const data = store.get();
     const mine = data.destinations.filter((d) => d.userId === req.user.id);
-    // We only have ciphertext here; mask using a fixed-length placeholder
-    // derived from stored metadata length rather than decrypting just to mask.
-    const result = mine.map((d) => ({
-      id: d.id,
-      platform: d.platform,
-      label: d.label,
-      rtmpUrl: d.rtmpUrl,
-      enabled: d.enabled,
-      streamKeyMasked: '*'.repeat(8),
-      createdAt: d.createdAt,
-    }));
+    // Decrypt only to build the last-4-chars mask (never returned, never
+    // logged) - a fixed-length placeholder for every row would make every
+    // destination look identical on reload, defeating the point of
+    // showing a mask at all (the user can no longer tell which stored key
+    // is which). AES-256-GCM decrypt of a handful of short strings per
+    // request is negligible cost.
+    const result = mine.map((d) => {
+      let plainKeyForMasking = null;
+      try {
+        plainKeyForMasking = decryptStreamKey(d.encryptedKey);
+      } catch (err) {
+        console.error('vcpeer-live: failed to decrypt destination key for masking:', err.message);
+      }
+      return toPublicDestination(d, plainKeyForMasking);
+    });
     return res.json({ destinations: result });
   });
 
@@ -88,7 +92,20 @@ function buildDestinationsRouter(store) {
       ...d,
       destinations: d.destinations.map((dest) => (dest.id === merged.id ? merged : dest)),
     }));
-    return res.json(toPublicDestination(merged, req.body.streamKey));
+
+    // If this request didn't include a new streamKey, mask from the
+    // (unchanged) stored ciphertext rather than passing `undefined`
+    // through to the mask helper, which would otherwise show a blank
+    // '****' placeholder for a key that never actually changed.
+    let plainKeyForMasking = req.body.streamKey;
+    if (!plainKeyForMasking) {
+      try {
+        plainKeyForMasking = decryptStreamKey(merged.encryptedKey);
+      } catch (err) {
+        console.error('vcpeer-live: failed to decrypt destination key for masking:', err.message);
+      }
+    }
+    return res.json(toPublicDestination(merged, plainKeyForMasking));
   });
 
   router.delete('/:id', (req, res) => {
