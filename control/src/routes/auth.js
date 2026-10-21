@@ -4,14 +4,42 @@ const express = require('express');
 const { requestMagicLink, consumeMagicLink, revokeSession, SESSION_TTL_MS } = require('../lib/auth');
 const { isValidEmail } = require('../lib/validate');
 const { sendMagicLinkEmail: sendMagicLinkEmailViaSmtp } = require('../lib/mailer');
+const { createRateLimiter } = require('../lib/rateLimit');
 
-function buildAuthRouter(store, { publicUrl, isDev, sendMagicLinkEmail = sendMagicLinkEmailViaSmtp }) {
+// Defaults for the real deploy: generous enough that a streamer who
+// retries a slow-to-arrive email isn't blocked, tight enough to stop
+// request-link from being used to mail-bomb a victim's inbox or burn
+// through the shared Scribase Mail SMTP quota. Per-email is the one that
+// actually matters for the "bomb a victim" case (it's not defeated by
+// the attacker spreading requests across many source IPs); per-IP is a
+// secondary guard against one source hammering many different emails.
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const DEFAULT_PER_EMAIL_MAX = 5;
+const DEFAULT_PER_IP_MAX = 20;
+
+function buildAuthRouter(
+  store,
+  { publicUrl, isDev, sendMagicLinkEmail = sendMagicLinkEmailViaSmtp, rateLimiters }
+) {
   const router = express.Router();
+  const limiters = rateLimiters || {
+    perEmail: createRateLimiter({ windowMs: DEFAULT_RATE_LIMIT_WINDOW_MS, max: DEFAULT_PER_EMAIL_MAX }),
+    perIp: createRateLimiter({ windowMs: DEFAULT_RATE_LIMIT_WINDOW_MS, max: DEFAULT_PER_IP_MAX }),
+  };
 
   router.post('/request-link', async (req, res) => {
     const email = (req.body && req.body.email || '').trim().toLowerCase();
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'a valid email is required' });
+    }
+
+    const ip = req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
+    const emailCheck = limiters.perEmail.check(`email:${email}`);
+    const ipCheck = limiters.perIp.check(`ip:${ip}`);
+    if (emailCheck.limited || ipCheck.limited) {
+      const retryAfterMs = Math.max(emailCheck.retryAfterMs, ipCheck.retryAfterMs);
+      res.set('Retry-After', String(Math.ceil(retryAfterMs / 1000)));
+      return res.status(429).json({ error: 'Too many sign-in requests. Please try again later.' });
     }
 
     let issuedToken = null;

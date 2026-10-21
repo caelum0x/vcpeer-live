@@ -34,7 +34,7 @@ function createApp(overrides = {}) {
     return res.json({ email: user.email });
   });
 
-  app.use('/api/auth', buildAuthRouter(store, { publicUrl, isDev }));
+  app.use('/api/auth', buildAuthRouter(store, { publicUrl, isDev, rateLimiters: overrides.authRateLimiters }));
   app.use('/api/destinations', buildDestinationsRouter(store));
   app.use(
     '/api/live',

@@ -10,12 +10,13 @@ process.env.ENCRYPTION_KEY = 'c'.repeat(64);
 process.env.VCPEER_LIVE_ENV = 'dev';
 
 const { createApp } = require('../src/server');
+const { createRateLimiter } = require('../src/lib/rateLimit');
 
 function tempDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-async function withServer(fn) {
+async function withServer(fn, appOverrides = {}) {
   const dataDir = tempDir('vcpeer-live-data-');
   const sharedDir = tempDir('vcpeer-live-shared-');
   const { app } = createApp({
@@ -23,6 +24,7 @@ async function withServer(fn) {
     sharedDir,
     publicUrl: 'http://localhost:0',
     ownCastStreamKey: 'owncast-test-key',
+    ...appOverrides,
   });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
@@ -260,6 +262,57 @@ test('updating a destination without changing its key still returns the real mas
     assert.equal(renamed.label, 'My Twitch (renamed)');
     assert.ok(renamed.streamKeyMasked.endsWith('cccc'));
   });
+});
+
+test('sign-in requests are rate limited per email to stop mail-bombing a target address', async () => {
+  const authRateLimiters = {
+    perIp: createRateLimiter({ windowMs: 60_000, max: 100 }),
+    perEmail: createRateLimiter({ windowMs: 60_000, max: 2 }),
+  };
+  await withServer(
+    async (base) => {
+      const body = JSON.stringify({ email: 'victim@vcpeer.com' });
+      const headers = { 'Content-Type': 'application/json' };
+
+      const first = await fetch(`${base}/api/auth/request-link`, { method: 'POST', headers, body });
+      assert.equal(first.status, 200);
+      const second = await fetch(`${base}/api/auth/request-link`, { method: 'POST', headers, body });
+      assert.equal(second.status, 200);
+
+      const third = await fetch(`${base}/api/auth/request-link`, { method: 'POST', headers, body });
+      assert.equal(third.status, 429);
+      assert.ok(third.headers.get('retry-after'));
+      const thirdBody = await third.json();
+      assert.ok(!thirdBody.devLink, 'a rate-limited response must never issue/echo a new link');
+    },
+    { authRateLimiters }
+  );
+});
+
+test('sign-in rate limits are scoped per email, not a global lockout for everyone', async () => {
+  const authRateLimiters = {
+    perIp: createRateLimiter({ windowMs: 60_000, max: 100 }),
+    perEmail: createRateLimiter({ windowMs: 60_000, max: 1 }),
+  };
+  await withServer(
+    async (base) => {
+      const headers = { 'Content-Type': 'application/json' };
+      const first = await fetch(`${base}/api/auth/request-link`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ email: 'one@vcpeer.com' }),
+      });
+      assert.equal(first.status, 200);
+
+      const other = await fetch(`${base}/api/auth/request-link`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ email: 'two@vcpeer.com' }),
+      });
+      assert.equal(other.status, 200);
+    },
+    { authRateLimiters }
+  );
 });
 
 test('destination lifecycle: toggle and delete', async () => {
