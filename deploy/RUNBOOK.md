@@ -1,5 +1,37 @@
 # VCPeer Live - deploy runbook
 
+## Current status (2026-10-22): already live, redeployed, do not re-provision
+
+Everything below this point (through "Rollback") describes the *original*
+local proof-of-concept and a from-scratch deploy plan written before this
+had ever shipped. It has since actually shipped and is live:
+
+- `https://live.vcpeer.com` (control app) and `https://watch.vcpeer.com`
+  (Owncast) are both live on the existing `box` (130.61.180.42, Oracle
+  Ampere A1) - **not** a new box, contrary to this file's old "Target box"
+  section below. RTMP 1935 / WHIP 8889 / WHIP-UDP 8189 are open in both
+  ufw and the box's OCI Security List.
+- Deployed at `/opt/infra-box/stacks/vcpeer-live` on the box via manual
+  rsync + `docker compose --env-file /etc/products/vcpeer-live.env build/up`
+  - there is no `.git` checkout there and no deploy script, so a fresh
+    `git clone` per "Steps" below would create a second, conflicting
+    deployment. To ship a change: rsync the changed files into that path,
+    rebuild the affected service(s), `up -d` them - see
+    `NOTES.md` for the exact command sequence used 2026-10-22.
+- The `SMTP_USER`/`SMTP_PASS`/`OWNCAST_ADMIN_PASSWORD` placeholders this
+  file's "Steps" section says to fill in are already filled in on the box
+  at `/etc/products/vcpeer-live.env`. The one real gap found 2026-10-22 -
+  `live@vcpeer.com` missing from Oracle Email Delivery's approved senders,
+  which made every sign-in request fail - is fixed (sender created, see
+  `NOTES.md`).
+
+Treat the rest of this file as **historical design reference** (why RTMP
+needs a raw port, why WHIP needs UDP, the domain/Caddy layout actually in
+use) rather than a to-do list - the "Steps" and "Owner-only" sections below
+describe work that is already done.
+
+---
+
 Everything in this directory and the repo root was **built and proven locally
 only**. No server, DNS, or production change was made in this session (hard
 limit, per the brief). This is the exact runbook for the owner-approved
