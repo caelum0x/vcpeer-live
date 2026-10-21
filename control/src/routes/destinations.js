@@ -1,11 +1,14 @@
 'use strict';
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 
 const { requireAuth } = require('../lib/auth');
 const { validateDestination } = require('../lib/validate');
 const { encryptStreamKey, decryptStreamKey, maskStreamKey } = require('../lib/crypto');
+const { writeFanoutFile } = require('../lib/live');
 
 function toPublicDestination(dest, plainKeyForMasking) {
   // Never return the encrypted payload or any derivable secret - only a
@@ -22,7 +25,29 @@ function toPublicDestination(dest, plainKeyForMasking) {
   };
 }
 
-function buildDestinationsRouter(store) {
+/**
+ * Re-writes the fan-out file for a user who is already live, so a
+ * destination create/enable/disable/delete takes effect immediately
+ * instead of waiting for the next POST /api/live/go. A no-op for a user
+ * who has never gone live (no ingest key yet, or no `.destinations` file
+ * on disk for their current key) - this must never be the thing that
+ * creates the first fanout file, only the thing that keeps an existing
+ * one current.
+ */
+function reArmIfLive(data, userId, { sharedDir, ownCastStreamKey }) {
+  const keyEntry = data.ingestKeys.find((k) => k.userId === userId);
+  if (!keyEntry) return;
+  const file = path.join(sharedDir, `${keyEntry.key}.destinations`);
+  if (!fs.existsSync(file)) return;
+  const mine = data.destinations.filter((d) => d.userId === userId);
+  try {
+    writeFanoutFile({ sharedDir, ingestKey: keyEntry.key, ownCastStreamKey, destinations: mine });
+  } catch (err) {
+    console.error('vcpeer-live: failed to re-arm fanout after destination change:', err.message);
+  }
+}
+
+function buildDestinationsRouter(store, { sharedDir, ownCastStreamKey } = {}) {
   const router = express.Router();
   router.use(requireAuth(store));
 
@@ -63,6 +88,7 @@ function buildDestinationsRouter(store) {
       createdAt: new Date().toISOString(),
     };
     store.update((data) => ({ ...data, destinations: [...data.destinations, dest] }));
+    reArmIfLive(store.get(), req.user.id, { sharedDir, ownCastStreamKey });
     return res.status(201).json(toPublicDestination(dest, req.body.streamKey));
   });
 
@@ -92,6 +118,7 @@ function buildDestinationsRouter(store) {
       ...d,
       destinations: d.destinations.map((dest) => (dest.id === merged.id ? merged : dest)),
     }));
+    reArmIfLive(store.get(), req.user.id, { sharedDir, ownCastStreamKey });
 
     // If this request didn't include a new streamKey, mask from the
     // (unchanged) stored ciphertext rather than passing `undefined`
@@ -113,6 +140,7 @@ function buildDestinationsRouter(store) {
     const existing = data.destinations.find((d) => d.id === req.params.id && d.userId === req.user.id);
     if (!existing) return res.status(404).json({ error: 'destination not found' });
     store.update((d) => ({ ...d, destinations: d.destinations.filter((dest) => dest.id !== req.params.id) }));
+    reArmIfLive(store.get(), req.user.id, { sharedDir, ownCastStreamKey });
     return res.status(204).end();
   });
 

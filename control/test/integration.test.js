@@ -360,6 +360,91 @@ test('regenerating the ingest key issues a new one and kills the old key\'s arme
   });
 });
 
+test('disabling a destination mid-stream pulls it out of the already-armed fanout file immediately', async () => {
+  await withServer(async (base, sharedDir) => {
+    const cookie = await signIn(base);
+
+    const createRes = await fetch(`${base}/api/destinations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({
+        platform: 'custom',
+        label: 'Fake Twitch (local)',
+        rtmpUrl: 'rtmp://mediamtx-fake:1935/twitch',
+        streamKey: 'fake-twitch-key-123',
+      }),
+    });
+    const created = await createRes.json();
+
+    const goRes = await fetch(`${base}/api/live/go`, { method: 'POST', headers: { Cookie: cookie } });
+    assert.equal((await goRes.json()).destinationsArmed, 1);
+
+    const files = fs.readdirSync(sharedDir).filter((f) => f.endsWith('.destinations'));
+    assert.equal(files.length, 1);
+    const armedFile = path.join(sharedDir, files[0]);
+    assert.ok(fs.readFileSync(armedFile, 'utf8').includes('fake-twitch-key-123'));
+
+    // Disabling the destination while already live (no second /api/live/go
+    // call) must stop the running fan-out from publishing to it - a leaked
+    // key or a destination the user wants to pull mid-stream can't wait
+    // for the next go-live.
+    const toggleRes = await fetch(`${base}/api/destinations/${created.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ enabled: false }),
+    });
+    assert.equal(toggleRes.status, 200);
+
+    const afterDisable = fs.readFileSync(armedFile, 'utf8');
+    assert.ok(!afterDisable.includes('fake-twitch-key-123'), 'disabled destination must be re-armed out immediately');
+    assert.ok(afterDisable.includes('owncast-test-key'), 'owncast target must still be armed');
+
+    // Deleting a still-enabled destination mid-stream must do the same.
+    const createRes2 = await fetch(`${base}/api/destinations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({
+        platform: 'custom',
+        label: 'Fake Kick (local)',
+        rtmpUrl: 'rtmp://mediamtx-fake:1935/kick',
+        streamKey: 'fake-kick-key-456',
+      }),
+    });
+    const created2 = await createRes2.json();
+    const afterSecondCreate = fs.readFileSync(armedFile, 'utf8');
+    assert.ok(
+      afterSecondCreate.includes('fake-kick-key-456'),
+      'a newly-added destination must also be armed immediately while already live'
+    );
+
+    const deleteRes = await fetch(`${base}/api/destinations/${created2.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: cookie },
+    });
+    assert.equal(deleteRes.status, 204);
+    const afterDelete = fs.readFileSync(armedFile, 'utf8');
+    assert.ok(!afterDelete.includes('fake-kick-key-456'), 'a deleted destination must be re-armed out immediately');
+  });
+});
+
+test('editing destinations before ever going live does not prematurely create a fanout file', async () => {
+  await withServer(async (base, sharedDir) => {
+    const cookie = await signIn(base);
+    await fetch(`${base}/api/destinations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({
+        platform: 'twitch',
+        label: 'My Twitch',
+        rtmpUrl: 'rtmp://live.twitch.tv/app',
+        streamKey: 'never-armed-key',
+      }),
+    });
+    const files = fs.existsSync(sharedDir) ? fs.readdirSync(sharedDir) : [];
+    assert.equal(files.length, 0, 'no fanout file should exist until the user has actually gone live once');
+  });
+});
+
 test('destination lifecycle: toggle and delete', async () => {
   await withServer(async (base) => {
     const cookie = await signIn(base);

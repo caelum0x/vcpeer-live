@@ -35,7 +35,7 @@ function createApp(overrides = {}) {
   });
 
   app.use('/api/auth', buildAuthRouter(store, { publicUrl, isDev, rateLimiters: overrides.authRateLimiters }));
-  app.use('/api/destinations', buildDestinationsRouter(store));
+  app.use('/api/destinations', buildDestinationsRouter(store, { sharedDir, ownCastStreamKey }));
   app.use(
     '/api/live',
     buildLiveRouter(store, { rtmpPublicUrl, whipPublicUrl, sharedDir, ownCastStreamKey })
