@@ -90,6 +90,24 @@ test('a reused/expired magic-link token is rejected', async () => {
   });
 });
 
+test('logging out revokes the session server-side, not just the cookie on the client', async () => {
+  await withServer(async (base) => {
+    const cookie = await signIn(base);
+
+    const beforeLogout = await fetch(`${base}/api/me`, { headers: { Cookie: cookie } });
+    assert.equal(beforeLogout.status, 200);
+
+    const logoutRes = await fetch(`${base}/api/auth/logout`, { method: 'POST', headers: { Cookie: cookie } });
+    assert.equal(logoutRes.status, 200);
+
+    // A copy of the old cookie (e.g. leaked, synced, or read from a shared
+    // machine before logout) must stop working - the server must have
+    // actually revoked the session, not just told the browser to clear it.
+    const afterLogout = await fetch(`${base}/api/me`, { headers: { Cookie: cookie } });
+    assert.equal(afterLogout.status, 401);
+  });
+});
+
 test('adding a destination never returns the plaintext stream key, and rejects invalid input', async () => {
   await withServer(async (base) => {
     const cookie = await signIn(base);

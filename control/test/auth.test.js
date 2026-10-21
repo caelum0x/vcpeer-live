@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { requestMagicLink, consumeMagicLink, resolveSession } = require('../src/lib/auth');
+const { requestMagicLink, consumeMagicLink, resolveSession, revokeSession } = require('../src/lib/auth');
 
 function emptyStore() {
   return { users: [], magicLinks: [], sessions: [], destinations: [], ingestKeys: [] };
@@ -92,4 +92,28 @@ test('resolveSession returns null for an expired session', () => {
     sessions: consumed.data.sessions.map((s) => ({ ...s, expiresAt: Date.now() - 1 })),
   };
   assert.equal(resolveSession(expiredStore, consumed.session.token), null);
+});
+
+test('revokeSession removes the matching session without mutating the input, and leaves others intact', () => {
+  const store = emptyStore();
+  // Build a store with two independent sessions for two different users.
+  const reqA = requestMagicLink(store, 'a@vcpeer.com');
+  const afterA = consumeMagicLink(reqA.data, reqA.token);
+  const reqB = requestMagicLink(afterA.data, 'b@vcpeer.com');
+  const afterB = consumeMagicLink(reqB.data, reqB.token);
+
+  const frozen = JSON.parse(JSON.stringify(afterB.data));
+  const next = revokeSession(afterB.data, afterA.session.token);
+
+  assert.deepEqual(afterB.data, frozen, 'input store object must not be mutated');
+  assert.equal(resolveSession(next, afterA.session.token), null, 'revoked session must stop resolving');
+  assert.ok(resolveSession(next, afterB.session.token), 'the other session must be untouched');
+});
+
+test('revokeSession is a no-op (returns an equivalent store) for an unknown token', () => {
+  const store = emptyStore();
+  const { data, token } = requestMagicLink(store, 'owner@vcpeer.com');
+  const consumed = consumeMagicLink(data, token);
+  const next = revokeSession(consumed.data, 'does-not-exist');
+  assert.deepEqual(next, consumed.data);
 });

@@ -57,6 +57,17 @@ function consumeMagicLink(data, token) {
   return { ok: true, data: next, session };
 }
 
+/**
+ * Revokes a session server-side (e.g. on logout). Returns a NEW store
+ * object with the matching session removed - a no-op (equivalent store)
+ * if the token doesn't match any session. Clearing the cookie alone is
+ * not enough: a copy of the old cookie value (leaked, synced, or read
+ * from a shared machine before logout) must stop being accepted too.
+ */
+function revokeSession(data, sessionToken) {
+  return { ...data, sessions: data.sessions.filter((s) => s.token !== sessionToken) };
+}
+
 /** Resolves a session token to a user, or null if invalid/expired. */
 function resolveSession(data, sessionToken) {
   if (!sessionToken) return null;
@@ -82,6 +93,7 @@ module.exports = {
   requestMagicLink,
   consumeMagicLink,
   resolveSession,
+  revokeSession,
   requireAuth,
   MAGIC_LINK_TTL_MS,
   SESSION_TTL_MS,

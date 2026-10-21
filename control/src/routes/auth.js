@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { requestMagicLink, consumeMagicLink, SESSION_TTL_MS } = require('../lib/auth');
+const { requestMagicLink, consumeMagicLink, revokeSession, SESSION_TTL_MS } = require('../lib/auth');
 const { isValidEmail } = require('../lib/validate');
 const { sendMagicLinkEmail: sendMagicLinkEmailViaSmtp } = require('../lib/mailer');
 
@@ -78,6 +78,10 @@ function buildAuthRouter(store, { publicUrl, isDev, sendMagicLinkEmail = sendMag
   });
 
   router.post('/logout', (req, res) => {
+    const sessionToken = req.cookies && req.cookies.vcpeer_live_session;
+    if (sessionToken) {
+      store.update((data) => revokeSession(data, sessionToken));
+    }
     res.clearCookie('vcpeer_live_session');
     return res.json({ ok: true });
   });
