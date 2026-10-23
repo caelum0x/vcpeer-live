@@ -423,6 +423,174 @@
     showToast('Stream key regenerated. The old one no longer works - update OBS with the new server URL above.');
   });
 
+  // --- Billing (Pro subscription) ---
+
+  const PENDING_INVITE_STORAGE_KEY = 'vcpeer_live_pending_invite';
+
+  async function loadBilling() {
+    const res = await api('/api/billing/status');
+    const data = await res.json();
+    const badge = document.getElementById('planBadge');
+    const upgradeBtn = document.getElementById('upgradeBtn');
+    const manageBtn = document.getElementById('manageBillingBtn');
+    const isPro = data.plan === 'pro';
+    badge.textContent = isPro ? 'Pro' : 'Free';
+    if (isPro) {
+      badge.classList.add('pro');
+    } else {
+      badge.classList.remove('pro');
+    }
+    upgradeBtn.style.display = isPro ? 'none' : '';
+    manageBtn.style.display = isPro && data.hasPortalAccess ? '' : 'none';
+    if (!data.configured) {
+      upgradeBtn.disabled = true;
+      upgradeBtn.title = 'Billing is being set up - check back soon.';
+    }
+    return data;
+  }
+
+  document.getElementById('upgradeBtn').addEventListener('click', async () => {
+    const res = await api('/api/billing/checkout', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || !data.checkoutUrl) {
+      showToast(data.error || 'Could not start checkout right now.');
+      return;
+    }
+    window.location.href = data.checkoutUrl;
+  });
+
+  document.getElementById('manageBillingBtn').addEventListener('click', async () => {
+    const res = await api('/api/billing/portal', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || !data.portalUrl) {
+      showToast(data.error || 'Could not open the billing portal right now.');
+      return;
+    }
+    window.location.href = data.portalUrl;
+  });
+
+  // --- Team (multi-seat, Pro only) ---
+
+  async function loadTeam() {
+    const res = await api('/api/team');
+    const data = await res.json();
+    const card = document.getElementById('teamCard');
+    const hint = document.getElementById('teamHint');
+    const ownerPanel = document.getElementById('teamOwnerPanel');
+    const memberPanel = document.getElementById('teamMemberPanel');
+    card.style.display = 'block';
+
+    if (data.memberOfTeamOwnedBy) {
+      hint.textContent = `You're on ${data.memberOfTeamOwnedBy}'s team - go live using their destinations above.`;
+      ownerPanel.style.display = 'none';
+      memberPanel.style.display = 'block';
+      document.getElementById('teamMemberOfText').textContent = `Member of ${data.memberOfTeamOwnedBy}'s team.`;
+      return;
+    }
+
+    memberPanel.style.display = 'none';
+
+    if (data.plan !== 'pro') {
+      hint.textContent = 'Upgrade to Pro to invite teammates onto your destinations.';
+      ownerPanel.style.display = 'none';
+      return;
+    }
+
+    hint.textContent = `${data.members.length + data.pendingInvites.length}/${data.maxSeats} seats used.`;
+    ownerPanel.style.display = 'block';
+
+    const memberList = document.getElementById('memberList');
+    const rows = [];
+    data.members.forEach((m) => {
+      rows.push(`
+        <div class="destination-row" data-member-id="${m.userId}">
+          <div class="destination-info"><div class="destination-meta"><div class="label">${m.email}</div><div class="url">joined ${formatSessionDate(m.joinedAt)}</div></div></div>
+          <div class="destination-actions"><button class="btn btn-danger" data-action="remove-member" data-id="${m.userId}">Remove</button></div>
+        </div>`);
+    });
+    data.pendingInvites.forEach((i) => {
+      rows.push(`
+        <div class="destination-row" data-invite-id="${i.id}">
+          <div class="destination-info"><div class="destination-meta"><div class="label">${i.email} <span class="hint" style="margin: 0;">(pending)</span></div><div class="url">invited ${formatSessionDate(i.createdAt)}</div></div></div>
+          <div class="destination-actions"><button class="btn btn-danger" data-action="revoke-invite" data-id="${i.id}">Revoke</button></div>
+        </div>`);
+    });
+    memberList.innerHTML = rows.length ? rows.join('') : '<div class="empty-state">No teammates yet - invite one below.</div>';
+  }
+
+  document.getElementById('inviteForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const emailField = document.getElementById('inviteEmail');
+    const email = emailField.value.trim();
+    const res = await api('/api/team/invites', { method: 'POST', body: JSON.stringify({ email }) });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Could not send that invite.');
+      return;
+    }
+    showToast(data.warning || `Invite sent to ${email}.`);
+    emailField.value = '';
+    await loadTeam();
+  });
+
+  document.getElementById('memberList').addEventListener('click', async (event) => {
+    const btn = event.target.closest('button[data-action]');
+    if (!btn) return;
+    if (btn.dataset.action === 'remove-member') {
+      await api(`/api/team/members/${btn.dataset.id}`, { method: 'DELETE' });
+      showToast('Teammate removed.');
+    } else if (btn.dataset.action === 'revoke-invite') {
+      await api(`/api/team/invites/${btn.dataset.id}`, { method: 'DELETE' });
+      showToast('Invite revoked.');
+    }
+    await loadTeam();
+  });
+
+  document.getElementById('leaveTeamBtn').addEventListener('click', async () => {
+    await api('/api/team/leave', { method: 'POST' });
+    showToast('You left the team.');
+    await loadTeam();
+    await loadDestinations();
+    await loadCredentials();
+    await loadHistory();
+  });
+
+  /**
+   * An invite link (`/live?acceptInvite=TOKEN`) lands here whether or
+   * not the visitor is already signed in. If they are not, the normal
+   * 401-redirect-to-'/' in api() above would otherwise strip the token
+   * from the URL before they ever sign in - so this runs FIRST, before
+   * any other API call in init(), and stashes the token in
+   * localStorage. Once init() reaches here again after a successful
+   * magic-link sign-in (which always redirects to plain /live), the
+   * token is still there and gets consumed exactly once.
+   */
+  function stashPendingInviteFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('acceptInvite');
+    if (token) {
+      localStorage.setItem(PENDING_INVITE_STORAGE_KEY, token);
+      history.replaceState(null, '', '/live');
+    }
+  }
+
+  async function consumePendingInviteIfAny() {
+    const token = localStorage.getItem(PENDING_INVITE_STORAGE_KEY);
+    if (!token) return;
+    localStorage.removeItem(PENDING_INVITE_STORAGE_KEY);
+    try {
+      const res = await api(`/api/team/invites/${token}/accept`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        showToast("Joined the team - you'll go live using their destinations.");
+      } else {
+        showToast(data.error || 'Could not accept that invite.');
+      }
+    } catch {
+      // api() already redirected to '/' for a 401 - nothing else to do.
+    }
+  }
+
   document.getElementById('logoutBtn').addEventListener('click', async () => {
     await api('/api/auth/logout', { method: 'POST' });
     window.location.href = '/';
@@ -437,12 +605,41 @@
   });
 
   (async function init() {
+    stashPendingInviteFromUrl();
     await loadCredentials();
     await loadDestinations();
     await loadStatus();
     await loadSessions();
     await loadHistory();
     await initTwitchConnect();
+    await loadBilling();
+    await loadTeam();
+    await consumePendingInviteIfAny();
+    // Accepting an invite (or returning from checkout) can change which
+    // destinations/credentials/history this account now shares - reload
+    // everything that depends on effectiveOwnerId once more afterward.
+    await loadDestinations();
+    await loadCredentials();
+    await loadHistory();
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('upgraded') === '1') {
+      history.replaceState(null, '', '/live');
+      showToast('Payment received - activating Pro. This can take a few seconds to show up below.');
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts += 1;
+        const billing = await loadBilling();
+        if (billing.plan === 'pro' || attempts >= 10) {
+          clearInterval(poll);
+          if (billing.plan === 'pro') {
+            await loadTeam();
+            showToast("You're on Pro now.");
+          }
+        }
+      }, 3000);
+    }
+
     setInterval(loadStatus, 5000);
   })();
 })();

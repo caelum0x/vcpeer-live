@@ -142,6 +142,18 @@ async function main() {
       // sandbox needs them explicitly since it has no real `window`.
       URLSearchParams,
       history: { replaceState() {} },
+      // live.js's team-invite-acceptance flow (added after this test was
+      // written) persists a pending invite token across the sign-in
+      // redirect via localStorage - same reasoning as URLSearchParams/
+      // history above, a minimal in-memory stub is enough for this test.
+      localStorage: (() => {
+        const backing = new Map();
+        return {
+          getItem: (key) => (backing.has(key) ? backing.get(key) : null),
+          setItem: (key, value) => backing.set(key, String(value)),
+          removeItem: (key) => backing.delete(key),
+        };
+      })(),
       setTimeout,
       setInterval: () => {},
       console,

@@ -88,4 +88,38 @@ async function sendStreamFailureEmail({ to, destinationLabel, platform, lastErro
   }
 }
 
-module.exports = { sendMagicLinkEmail, sendStreamFailureEmail };
+/**
+ * Sends a "you've been invited to a VCPeer Live team" email. Fails soft,
+ * same as the other senders here - the route that calls this still
+ * returns the invite link in the response (or logs it in dev mode) so a
+ * mailer outage never strands an invite the owner already created.
+ */
+async function sendTeamInviteEmail({ to, link, ownerEmail }) {
+  const from = process.env.SMTP_FROM || 'VCPeer Live <live@vcpeer.com>';
+  const transporter = buildTransporter();
+  if (!transporter) {
+    return { sent: false, reason: 'smtp_not_configured' };
+  }
+
+  const subject = `${ownerEmail} invited you to their VCPeer Live team`;
+  try {
+    await transporter.sendMail({
+      from,
+      to,
+      subject,
+      text:
+        `${ownerEmail} invited you to co-operate their VCPeer Live stream - you'll be able to go live using their ` +
+        `destinations (Twitch/Kick/YouTube/custom).\n\nAccept: ${link}\n\nThis invite expires in 7 days.`,
+      html:
+        `<p><strong>${ownerEmail}</strong> invited you to co-operate their VCPeer Live stream - you'll be able to go ` +
+        `live using their destinations (Twitch/Kick/YouTube/custom).</p><p><a href="${link}">${link}</a></p>` +
+        `<p>This invite expires in 7 days.</p>`,
+    });
+    return { sent: true };
+  } catch (err) {
+    console.error('vcpeer-live mailer: failed to send team invite email:', err.message);
+    return { sent: false, reason: 'send_failed' };
+  }
+}
+
+module.exports = { sendMagicLinkEmail, sendStreamFailureEmail, sendTeamInviteEmail };

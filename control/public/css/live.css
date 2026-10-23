@@ -124,6 +124,26 @@ body {
     background: currentColor;
 }
 
+.plan-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ds-space-2);
+    padding: 3px 10px;
+    border-radius: var(--ds-radius-full);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--ds-neutral-300);
+    vertical-align: middle;
+}
+
+.plan-badge.pro {
+    background: rgba(34, 197, 94, 0.14);
+    color: var(--ds-success);
+}
+
 .credential-row {
     display: flex;
     align-items: center;

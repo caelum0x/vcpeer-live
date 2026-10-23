@@ -98,6 +98,12 @@ services:
       SMTP_USER: "${SMTP_USER:-}"
       SMTP_PASS: "${SMTP_PASS:-}"
       SMTP_FROM: "${SMTP_FROM:-VCPeer Live <live@vcpeer.com>}"
+      TWITCH_CLIENT_ID: "${TWITCH_CLIENT_ID:-}"
+      TWITCH_CLIENT_SECRET: "${TWITCH_CLIENT_SECRET:-}"
+      DODO_PAYMENTS_API_KEY: "${DODO_PAYMENTS_API_KEY:-}"
+      DODO_PAYMENTS_WEBHOOK_KEY: "${DODO_PAYMENTS_WEBHOOK_KEY:-}"
+      DODO_PRODUCT_PRO_MONTHLY: "${DODO_PRODUCT_PRO_MONTHLY:-}"
+      DODO_PAYMENTS_TEST_MODE: "${DODO_PAYMENTS_TEST_MODE:-false}"
     volumes:
       - control-data:/data
       - fanout-shared:/shared

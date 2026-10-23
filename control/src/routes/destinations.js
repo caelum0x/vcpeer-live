@@ -9,6 +9,7 @@ const { requireAuth } = require('../lib/auth');
 const { validateDestination } = require('../lib/validate');
 const { encryptStreamKey, decryptStreamKey, maskStreamKey } = require('../lib/crypto');
 const { writeFanoutFile } = require('../lib/live');
+const { effectiveOwnerId } = require('../lib/team');
 
 function toPublicDestination(dest, plainKeyForMasking) {
   // Never return the encrypted payload or any derivable secret - only a
@@ -53,7 +54,8 @@ function buildDestinationsRouter(store, { sharedDir, ownCastStreamKey } = {}) {
 
   router.get('/', (req, res) => {
     const data = store.get();
-    const mine = data.destinations.filter((d) => d.userId === req.user.id);
+    const ownerId = effectiveOwnerId(data, req.user.id);
+    const mine = data.destinations.filter((d) => d.userId === ownerId);
     // Decrypt only to build the last-4-chars mask (never returned, never
     // logged) - a fixed-length placeholder for every row would make every
     // destination look identical on reload, defeating the point of
@@ -76,10 +78,11 @@ function buildDestinationsRouter(store, { sharedDir, ownCastStreamKey } = {}) {
     const { valid, errors } = validateDestination(req.body);
     if (!valid) return res.status(400).json({ errors });
 
+    const ownerId = effectiveOwnerId(store.get(), req.user.id);
     const encryptedKey = encryptStreamKey(req.body.streamKey.trim());
     const dest = {
       id: crypto.randomUUID(),
-      userId: req.user.id,
+      userId: ownerId,
       platform: req.body.platform,
       label: req.body.label.trim(),
       rtmpUrl: req.body.rtmpUrl.trim(),
@@ -88,13 +91,14 @@ function buildDestinationsRouter(store, { sharedDir, ownCastStreamKey } = {}) {
       createdAt: new Date().toISOString(),
     };
     store.update((data) => ({ ...data, destinations: [...data.destinations, dest] }));
-    reArmIfLive(store.get(), req.user.id, { sharedDir, ownCastStreamKey });
+    reArmIfLive(store.get(), ownerId, { sharedDir, ownCastStreamKey });
     return res.status(201).json(toPublicDestination(dest, req.body.streamKey));
   });
 
   router.put('/:id', (req, res) => {
     const data = store.get();
-    const existing = data.destinations.find((d) => d.id === req.params.id && d.userId === req.user.id);
+    const ownerId = effectiveOwnerId(data, req.user.id);
+    const existing = data.destinations.find((d) => d.id === req.params.id && d.userId === ownerId);
     if (!existing) return res.status(404).json({ error: 'destination not found' });
 
     const patch = {};
@@ -118,7 +122,7 @@ function buildDestinationsRouter(store, { sharedDir, ownCastStreamKey } = {}) {
       ...d,
       destinations: d.destinations.map((dest) => (dest.id === merged.id ? merged : dest)),
     }));
-    reArmIfLive(store.get(), req.user.id, { sharedDir, ownCastStreamKey });
+    reArmIfLive(store.get(), ownerId, { sharedDir, ownCastStreamKey });
 
     // If this request didn't include a new streamKey, mask from the
     // (unchanged) stored ciphertext rather than passing `undefined`
@@ -137,10 +141,11 @@ function buildDestinationsRouter(store, { sharedDir, ownCastStreamKey } = {}) {
 
   router.delete('/:id', (req, res) => {
     const data = store.get();
-    const existing = data.destinations.find((d) => d.id === req.params.id && d.userId === req.user.id);
+    const ownerId = effectiveOwnerId(data, req.user.id);
+    const existing = data.destinations.find((d) => d.id === req.params.id && d.userId === ownerId);
     if (!existing) return res.status(404).json({ error: 'destination not found' });
     store.update((d) => ({ ...d, destinations: d.destinations.filter((dest) => dest.id !== req.params.id) }));
-    reArmIfLive(store.get(), req.user.id, { sharedDir, ownCastStreamKey });
+    reArmIfLive(store.get(), ownerId, { sharedDir, ownCastStreamKey });
     return res.status(204).end();
   });
 

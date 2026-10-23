@@ -28,13 +28,32 @@ class JsonStore {
         ingestKeys: [],
         broadcasts: [],
         failureAlerts: [],
+        teamMembers: [],
+        teamInvites: [],
       });
     }
   }
 
   _read() {
     const raw = fs.readFileSync(this.filePath, 'utf8');
-    return JSON.parse(raw);
+    const data = JSON.parse(raw);
+    // Defaults any collection added after a given db.json was first
+    // written, so an existing production file (no teamMembers/
+    // teamInvites arrays yet) doesn't need a manual migration - every
+    // lib already also defensively reads `data.x || []` on top of this,
+    // this is just belt-and-suspenders for anything that doesn't.
+    return {
+      users: [],
+      magicLinks: [],
+      sessions: [],
+      destinations: [],
+      ingestKeys: [],
+      broadcasts: [],
+      failureAlerts: [],
+      teamMembers: [],
+      teamInvites: [],
+      ...data,
+    };
   }
 
   _write(data) {

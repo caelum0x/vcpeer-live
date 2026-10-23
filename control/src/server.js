@@ -10,6 +10,8 @@ const { buildDestinationsRouter } = require('./routes/destinations');
 const { buildLiveRouter } = require('./routes/live');
 const { buildBroadcastsRouter } = require('./routes/broadcasts');
 const { buildOauthRouter } = require('./routes/oauth');
+const { buildBillingRouter, buildBillingWebhookHandler } = require('./routes/billing');
+const { buildTeamRouter } = require('./routes/team');
 const { resolveSession } = require('./lib/auth');
 const { checkFailuresAndNotify } = require('./lib/healthAlerts');
 const { sendStreamFailureEmail } = require('./lib/mailer');
@@ -26,6 +28,11 @@ function createApp(overrides = {}) {
   const store = overrides.store || new JsonStore(dataFile);
 
   const app = express();
+  // Mounted BEFORE express.json() with its own express.raw() middleware -
+  // Dodo webhook signature verification needs the exact raw bytes sent,
+  // which express.json() would otherwise have already parsed away by
+  // the time any router below saw the request. See routes/billing.js.
+  app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), buildBillingWebhookHandler(store));
   app.use(express.json());
   app.use(cookieParser());
   // `extensions: ['html']` lets clean URLs like /vs/restream resolve to
@@ -49,6 +56,8 @@ function createApp(overrides = {}) {
   );
   app.use('/api/broadcasts', buildBroadcastsRouter(store));
   app.use('/api/oauth', buildOauthRouter(store, { publicUrl }));
+  app.use('/api/billing', buildBillingRouter(store, { publicUrl }));
+  app.use('/api/team', buildTeamRouter(store, { publicUrl, isDev }));
 
   app.get('/live', (req, res) => {
     res.sendFile(path.join(__dirname, '..', 'public', 'live.html'));

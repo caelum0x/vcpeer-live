@@ -11,6 +11,7 @@ const {
   removeFanoutArtifacts,
 } = require('../lib/live');
 const { startBroadcast, stopBroadcast } = require('../lib/broadcasts');
+const { effectiveOwnerId } = require('../lib/team');
 
 function buildLiveRouter(store, { rtmpPublicUrl, whipPublicUrl, sharedDir, ownCastStreamKey }) {
   const router = express.Router();
@@ -25,9 +26,10 @@ function buildLiveRouter(store, { rtmpPublicUrl, whipPublicUrl, sharedDir, ownCa
   }
 
   router.get('/credentials', (req, res) => {
+    const ownerId = effectiveOwnerId(store.get(), req.user.id);
     let ingestKey;
     store.update((data) => {
-      const result = getOrCreateIngestKey(data, req.user.id);
+      const result = getOrCreateIngestKey(data, ownerId);
       ingestKey = result.key;
       return result.data;
     });
@@ -37,12 +39,15 @@ function buildLiveRouter(store, { rtmpPublicUrl, whipPublicUrl, sharedDir, ownCa
   // Rotates the signed-in user's ingest key - the only credential a
   // leaked RTMP/WHIP URL exposes - and deletes any already-armed
   // fanout config on disk for the old key so it stops working
-  // immediately, not just once the user re-arms with the new one.
+  // immediately, not just once the user re-arms with the new one. A
+  // team member rotates the OWNER's key (same one everyone on the team
+  // streams through), not a key of their own.
   router.post('/credentials/regenerate', (req, res) => {
+    const ownerId = effectiveOwnerId(store.get(), req.user.id);
     let oldKey;
     let newKey;
     store.update((data) => {
-      const result = regenerateIngestKey(data, req.user.id);
+      const result = regenerateIngestKey(data, ownerId);
       oldKey = result.oldKey;
       newKey = result.newKey;
       return result.data;
@@ -57,14 +62,15 @@ function buildLiveRouter(store, { rtmpPublicUrl, whipPublicUrl, sharedDir, ownCa
 
   router.post('/go', (req, res) => {
     const data = store.get();
+    const ownerId = effectiveOwnerId(data, req.user.id);
     let ingestKey;
     store.update((current) => {
-      const result = getOrCreateIngestKey(current, req.user.id);
+      const result = getOrCreateIngestKey(current, ownerId);
       ingestKey = result.key;
       return result.data;
     });
 
-    const mine = data.destinations.filter((d) => d.userId === req.user.id);
+    const mine = data.destinations.filter((d) => d.userId === ownerId);
     try {
       const { armedCount } = writeFanoutFile({
         sharedDir,
@@ -79,8 +85,11 @@ function buildLiveRouter(store, { rtmpPublicUrl, whipPublicUrl, sharedDir, ownCa
       // explicit POST /api/live/go (OBS "Arm destinations" or the browser
       // go-live button) starts a new history record, so toggling one
       // destination on/off while already live does not fragment a single
-      // broadcast into several history rows.
-      store.update((current) => startBroadcast(current, { userId: req.user.id, ingestKey, destinationsArmed: armedCount }).data);
+      // broadcast into several history rows. Keyed by `ownerId`, not the
+      // signed-in user, so a team member going live shows up in - and
+      // shares - the owner's one broadcast history, not a second history
+      // of their own.
+      store.update((current) => startBroadcast(current, { userId: ownerId, ingestKey, destinationsArmed: armedCount }).data);
       return res.json({ ok: true, destinationsArmed: armedCount, ingestKey });
     } catch (err) {
       console.error('vcpeer-live: failed to write fanout file:', err.message);
@@ -98,13 +107,14 @@ function buildLiveRouter(store, { rtmpPublicUrl, whipPublicUrl, sharedDir, ownCa
   // it closes, and is a safe no-op if nothing was open.
   router.post('/stop', (req, res) => {
     const data = store.get();
-    const keyEntry = data.ingestKeys.find((k) => k.userId === req.user.id);
+    const ownerId = effectiveOwnerId(data, req.user.id);
+    const keyEntry = data.ingestKeys.find((k) => k.userId === ownerId);
     const destinationsSnapshot = keyEntry
       ? readFanoutStatus({ sharedDir, ingestKey: keyEntry.key }).destinations
       : [];
     let broadcast = null;
     store.update((current) => {
-      const result = stopBroadcast(current, req.user.id, { destinationsSnapshot });
+      const result = stopBroadcast(current, ownerId, { destinationsSnapshot });
       broadcast = result.broadcast;
       return result.data;
     });
@@ -115,10 +125,10 @@ function buildLiveRouter(store, { rtmpPublicUrl, whipPublicUrl, sharedDir, ownCa
   });
 
   router.get('/status', (req, res) => {
-    const data = store.get();
+    const ownerId = effectiveOwnerId(store.get(), req.user.id);
     let ingestKey;
     store.update((current) => {
-      const result = getOrCreateIngestKey(current, req.user.id);
+      const result = getOrCreateIngestKey(current, ownerId);
       ingestKey = result.key;
       return result.data;
     });

@@ -43,6 +43,36 @@
                 <video id="browserPreview" style="display: none; width: 100%; max-width: 360px; margin-top: 16px; border-radius: 10px; background: #000;" autoplay muted playsinline></video>
             </section>
 
+            <section class="card" id="billingCard">
+                <h2>Plan <span id="planBadge" class="plan-badge">Free</span></h2>
+                <p class="hint">Unlimited destinations stay free forever. Pro adds unlimited broadcast history and up to 3 team seats on one shared set of destinations.</p>
+                <div id="billingActions" style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                    <button id="upgradeBtn" class="btn btn-primary" type="button">Upgrade to Pro — $9/mo</button>
+                    <button id="manageBillingBtn" class="btn btn-ghost" type="button" style="display: none;">Manage billing</button>
+                </div>
+            </section>
+
+            <section class="card" id="teamCard" style="display: none;">
+                <h2>Team</h2>
+                <p id="teamHint" class="hint"></p>
+                <div id="teamOwnerPanel" style="display: none;">
+                    <div id="memberList" class="destination-list"></div>
+                    <form id="inviteForm" class="form-grid" style="margin-top: var(--ds-space-4);">
+                        <div class="field full">
+                            <label for="inviteEmail">Invite by email</label>
+                            <input id="inviteEmail" type="email" placeholder="teammate@example.com" required />
+                        </div>
+                        <div class="field full">
+                            <button type="submit" class="btn btn-primary">Send invite</button>
+                        </div>
+                    </form>
+                </div>
+                <div id="teamMemberPanel" style="display: none;">
+                    <p class="hint" id="teamMemberOfText"></p>
+                    <button id="leaveTeamBtn" class="btn btn-ghost" type="button">Leave team</button>
+                </div>
+            </section>
+
             <section class="card">
                 <h2>Destinations</h2>
                 <p class="hint">Add Twitch, Kick, YouTube or any custom RTMP(S) endpoint. Stream keys are encrypted at rest and never shown again.</p>
