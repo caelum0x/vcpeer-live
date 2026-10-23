@@ -49,6 +49,7 @@ function consumeMagicLink(data, token) {
   const session = {
     token: sessionToken,
     userId: link.userId,
+    createdAt: new Date().toISOString(),
     expiresAt: Date.now() + SESSION_TTL_MS,
   };
 
@@ -66,6 +67,52 @@ function consumeMagicLink(data, token) {
  */
 function revokeSession(data, sessionToken) {
   return { ...data, sessions: data.sessions.filter((s) => s.token !== sessionToken) };
+}
+
+/**
+ * Derives a stable, non-reversible identifier for a session from its raw
+ * token - used so GET /api/auth/sessions can list and target individual
+ * sessions for remote revocation without ever sending the raw session
+ * token (a live bearer credential) back down to the browser. SHA-256 of
+ * the token, truncated to 16 hex chars, is plenty of entropy to avoid
+ * collisions across one user's handful of sessions while being useless on
+ * its own for re-authenticating.
+ */
+function sessionId(sessionToken) {
+  return crypto.createHash('sha256').update(sessionToken).digest('hex').slice(0, 16);
+}
+
+/**
+ * Lists a user's active (non-expired) sessions as safe-to-display
+ * summaries - never the raw token. `currentSessionToken` (the requester's
+ * own cookie) is used only to flag which row is "this device" in the UI;
+ * it is never itself returned.
+ */
+function listSessions(data, userId, currentSessionToken) {
+  const now = Date.now();
+  return data.sessions
+    .filter((s) => s.userId === userId && s.expiresAt > now)
+    .map((s) => ({
+      id: sessionId(s.token),
+      createdAt: s.createdAt || null,
+      expiresAt: new Date(s.expiresAt).toISOString(),
+      current: s.token === currentSessionToken,
+    }))
+    .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+}
+
+/**
+ * Revokes one specific session by its derived id (see sessionId above),
+ * scoped to the requesting user so one account can never revoke another
+ * account's session even if it somehow guessed an id. Returns a NEW store
+ * object; a no-op (equivalent store) if no session matches - the caller
+ * decides whether that is a 404.
+ */
+function revokeSessionById(data, userId, targetSessionId) {
+  return {
+    ...data,
+    sessions: data.sessions.filter((s) => !(s.userId === userId && sessionId(s.token) === targetSessionId)),
+  };
 }
 
 /** Resolves a session token to a user, or null if invalid/expired. */
@@ -94,6 +141,9 @@ module.exports = {
   consumeMagicLink,
   resolveSession,
   revokeSession,
+  revokeSessionById,
+  listSessions,
+  sessionId,
   requireAuth,
   MAGIC_LINK_TTL_MS,
   SESSION_TTL_MS,

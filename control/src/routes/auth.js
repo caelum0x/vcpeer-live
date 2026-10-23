@@ -1,7 +1,15 @@
 'use strict';
 
 const express = require('express');
-const { requestMagicLink, consumeMagicLink, revokeSession, SESSION_TTL_MS } = require('../lib/auth');
+const {
+  requestMagicLink,
+  consumeMagicLink,
+  revokeSession,
+  revokeSessionById,
+  listSessions,
+  requireAuth,
+  SESSION_TTL_MS,
+} = require('../lib/auth');
 const { isValidEmail } = require('../lib/validate');
 const { sendMagicLinkEmail: sendMagicLinkEmailViaSmtp } = require('../lib/mailer');
 const { createRateLimiter } = require('../lib/rateLimit');
@@ -112,6 +120,28 @@ function buildAuthRouter(
     }
     res.clearCookie('vcpeer_live_session');
     return res.json({ ok: true });
+  });
+
+  // Today a forwarded/leaked magic-link session can only be killed by
+  // logging out the CURRENT browser (clearing this device's own cookie).
+  // These two routes let a signed-in user see every other active session
+  // on their account and revoke one remotely - e.g. after sharing a magic
+  // link by accident, or signing in on a shared/public machine and
+  // forgetting to log out there.
+  router.get('/sessions', requireAuth(store), (req, res) => {
+    const currentSessionToken = req.cookies && req.cookies.vcpeer_live_session;
+    const sessions = listSessions(store.get(), req.user.id, currentSessionToken);
+    return res.json({ sessions });
+  });
+
+  router.delete('/sessions/:id', requireAuth(store), (req, res) => {
+    const before = listSessions(store.get(), req.user.id).length;
+    store.update((data) => revokeSessionById(data, req.user.id, req.params.id));
+    const after = listSessions(store.get(), req.user.id).length;
+    if (after === before) {
+      return res.status(404).json({ error: 'session not found' });
+    }
+    return res.status(204).end();
   });
 
   return router;
