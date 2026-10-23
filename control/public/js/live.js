@@ -121,6 +121,70 @@
     });
   }
 
+  // Static, well-known ingest URLs - Kick and YouTube's public APIs don't
+  // expose a raw stream key to third-party apps the way Twitch's Helix
+  // `GET /streams/key` does, so for those two platforms this is as far
+  // as "auto-fill" goes: the server URL fills in, the user still pastes
+  // their own key from the platform's dashboard. Twitch gets the same
+  // URL autofill here PLUS the full OAuth key fetch via "Connect Twitch".
+  const PLATFORM_DEFAULT_URLS = {
+    twitch: 'rtmp://live.twitch.tv/app',
+    kick: 'rtmp://fa723fc1b171.global-contribute.live-video.net/app',
+    youtube: 'rtmp://a.rtmp.youtube.com/live2',
+  };
+
+  document.getElementById('platform').addEventListener('change', (event) => {
+    const urlField = document.getElementById('rtmpUrl2');
+    const defaultUrl = PLATFORM_DEFAULT_URLS[event.target.value];
+    // Only overwrite if the field is empty or still holds a previous
+    // platform's default - never clobber a URL the user typed by hand.
+    const isEmptyOrDefault = !urlField.value || Object.values(PLATFORM_DEFAULT_URLS).includes(urlField.value);
+    if (defaultUrl && isEmptyOrDefault) {
+      urlField.value = defaultUrl;
+    }
+  });
+
+  async function initTwitchConnect() {
+    const row = document.getElementById('connectTwitchRow');
+    const btn = document.getElementById('connectTwitchBtn');
+    try {
+      const res = await api('/api/oauth/twitch/status');
+      const data = await res.json();
+      row.style.display = data.configured ? 'block' : 'none';
+    } catch {
+      row.style.display = 'none';
+    }
+
+    btn.addEventListener('click', () => {
+      window.location.href = '/api/oauth/twitch/start';
+    });
+
+    // Returning from the Twitch OAuth redirect: pick up the one-time
+    // pending credentials and fill the add-destination form, but do NOT
+    // auto-submit - the user still reviews/labels it before it's saved
+    // (and saving is what actually encrypts+persists the key).
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('twitchConnected') === '1') {
+      try {
+        const pendingRes = await api('/api/oauth/twitch/pending');
+        const pendingData = await pendingRes.json();
+        if (pendingData.ok) {
+          document.getElementById('platform').value = pendingData.platform;
+          document.getElementById('rtmpUrl2').value = pendingData.rtmpUrl;
+          document.getElementById('streamKey').value = pendingData.streamKey;
+          document.getElementById('label').focus();
+          showToast('Twitch connected — review the label below, then Add destination.');
+        }
+      } catch {
+        showToast('Could not retrieve Twitch credentials — try Connect Twitch again.');
+      }
+      history.replaceState(null, '', '/live');
+    } else if (params.get('twitchError')) {
+      showToast('Twitch connect failed (' + params.get('twitchError') + '). Use the manual form below instead.');
+      history.replaceState(null, '', '/live');
+    }
+  }
+
   document.getElementById('addDestinationForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     const platform = document.getElementById('platform').value;
@@ -172,6 +236,7 @@
       return;
     }
     showToast(`Armed ${data.destinationsArmed} destination(s). Start pushing from OBS or the browser now.`);
+    await loadHistory();
   });
 
   let whip = null;
@@ -222,9 +287,123 @@
       await whip.publish(localStream);
       btn.textContent = 'Stop browser broadcast';
       showToast(`Broadcasting from browser via WHIP. Armed ${goData.destinationsArmed} destination(s).`);
+      await loadHistory();
     } catch (err) {
       showToast('Could not start browser broadcast: ' + err.message);
     }
+  });
+
+  function formatDuration(ms) {
+    if (ms == null) return 'in progress';
+    const totalMinutes = Math.round(ms / 60000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours === 0) return `${minutes}m`;
+    return `${hours}h ${minutes}m`;
+  }
+
+  function formatClock(iso) {
+    try {
+      return new Date(iso).toLocaleString();
+    } catch {
+      return iso;
+    }
+  }
+
+  async function loadHistory() {
+    const summary = document.getElementById('historySummary');
+    const list = document.getElementById('historyList');
+    const res = await api('/api/broadcasts');
+    const data = await res.json();
+    const broadcasts = data.broadcasts || [];
+
+    if (!broadcasts.length) {
+      summary.textContent = '';
+      list.innerHTML = '<div class="empty-state">No broadcasts yet - go live once and it will show up here.</div>';
+      return;
+    }
+
+    summary.textContent = `${broadcasts.length} broadcast(s) · ${data.totalHours.toFixed(1)} hour(s) streamed total`;
+
+    list.innerHTML = broadcasts
+      .map((b) => {
+        const destRows = (b.destinationsSnapshot || [])
+          .map((d) => destStatusDot(d) + ` <span style="color: var(--ds-neutral-300); font-size: 0.78rem;">${d.label}</span>`)
+          .join(' &nbsp; ');
+        return `
+      <div class="destination-row" style="align-items: flex-start;">
+        <div class="destination-info" style="flex-direction: column; align-items: flex-start; gap: 4px;">
+          <div class="destination-meta">
+            <div class="label">${formatClock(b.startedAt)} ${b.endedAt ? '' : '<span style="color: var(--ds-success);">(live now)</span>'}</div>
+            <div class="url">${formatDuration(b.durationMs)} · ${b.destinationsArmed} destination(s) armed</div>
+            ${destRows ? `<div style="margin-top: 6px;">${destRows}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+      })
+      .join('');
+  }
+
+  document.getElementById('stopBroadcastBtn').addEventListener('click', async () => {
+    const res = await api('/api/live/stop', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Could not stop the broadcast.');
+      return;
+    }
+    if (!data.broadcast) {
+      showToast('No open broadcast to stop.');
+    } else {
+      showToast('Broadcast marked finished in your history.');
+    }
+    await loadHistory();
+  });
+
+  function formatSessionDate(iso) {
+    if (!iso) return 'unknown date';
+    try {
+      return new Date(iso).toLocaleString();
+    } catch {
+      return iso;
+    }
+  }
+
+  async function loadSessions() {
+    const list = document.getElementById('sessionList');
+    const res = await api('/api/auth/sessions');
+    const data = await res.json();
+    if (!data.sessions || !data.sessions.length) {
+      list.innerHTML = '<div class="empty-state">No active sessions.</div>';
+      return;
+    }
+    list.innerHTML = data.sessions
+      .map(
+        (s) => `
+      <div class="destination-row" data-session-id="${s.id}">
+        <div class="destination-info">
+          <div class="destination-meta">
+            <div class="label">${s.current ? 'This device' : 'Other device'}</div>
+            <div class="url">Signed in ${formatSessionDate(s.createdAt)} • expires ${formatSessionDate(s.expiresAt)}</div>
+          </div>
+        </div>
+        <div class="destination-actions">
+          ${s.current ? '<span class="hint" style="margin: 0;">current</span>' : `<button class="btn btn-danger" data-action="revoke-session" data-id="${s.id}">Revoke</button>`}
+        </div>
+      </div>`
+      )
+      .join('');
+  }
+
+  document.getElementById('sessionList').addEventListener('click', async (event) => {
+    const btn = event.target.closest('button[data-action="revoke-session"]');
+    if (!btn) return;
+    const res = await api(`/api/auth/sessions/${btn.dataset.id}`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 204) {
+      showToast('Could not revoke that session.');
+      return;
+    }
+    showToast('Session revoked.');
+    await loadSessions();
   });
 
   document.getElementById('regenerateKeyBtn').addEventListener('click', async () => {
@@ -261,6 +440,9 @@
     await loadCredentials();
     await loadDestinations();
     await loadStatus();
+    await loadSessions();
+    await loadHistory();
+    await initTwitchConnect();
     setInterval(loadStatus, 5000);
   })();
 })();

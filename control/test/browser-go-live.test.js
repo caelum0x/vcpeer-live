@@ -110,7 +110,6 @@ async function main() {
     ].forEach(makeEl);
 
     const calls = []; // records every fetch() call in order
-    const fakeWindow = { location: { href: '' } };
     const fakeNavigator = {
       mediaDevices: {
         async getUserMedia() {
@@ -135,9 +134,14 @@ async function main() {
         getElementById: (id) => elements.get(id) || makeEl(id),
         querySelectorAll: () => [],
       },
-      window: fakeWindow,
+      window: { location: { href: '', search: '' } },
       navigator: fakeNavigator,
       WhipPublisher: FakeWhipPublisher,
+      // live.js's session/history/OAuth-return panels (added after this
+      // test was written) use these two standard browser globals - the vm
+      // sandbox needs them explicitly since it has no real `window`.
+      URLSearchParams,
+      history: { replaceState() {} },
       setTimeout,
       setInterval: () => {},
       console,

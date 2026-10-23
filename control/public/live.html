@@ -36,6 +36,9 @@
                     <button id="browserGoLiveBtn" class="btn btn-ghost" style="margin-left: 12px;">
                         Go live from browser
                     </button>
+                    <button id="stopBroadcastBtn" class="btn btn-ghost" style="margin-left: 12px;" title="Marks this broadcast finished in your history - does not force-disconnect OBS/the browser">
+                        ⏹ I'm done streaming
+                    </button>
                 </div>
                 <video id="browserPreview" style="display: none; width: 100%; max-width: 360px; margin-top: 16px; border-radius: 10px; background: #000;" autoplay muted playsinline></video>
             </section>
@@ -47,6 +50,9 @@
                     <div class="empty-state">No destinations yet — add your first one below.</div>
                 </div>
 
+                <div id="connectTwitchRow" style="display: none; margin-bottom: var(--ds-space-4);">
+                    <button id="connectTwitchBtn" type="button" class="btn btn-ghost">⚡ Connect Twitch (auto-fills URL + key)</button>
+                </div>
                 <form id="addDestinationForm" class="form-grid">
                     <div class="field">
                         <label for="platform">Platform</label>
@@ -56,6 +62,7 @@
                             <option value="youtube">YouTube</option>
                             <option value="custom">Custom RTMP(S)</option>
                         </select>
+                        <p class="hint" style="margin: 6px 0 0;">Picking Twitch, Kick or YouTube auto-fills the standard server URL below — you still paste in your own stream key (Twitch can auto-fill that too via Connect Twitch above).</p>
                     </div>
                     <div class="field">
                         <label for="label">Label</label>
@@ -76,6 +83,23 @@
             </section>
 
             <section class="card">
+                <h2>Broadcast history</h2>
+                <p class="hint">Past streams, total hours streamed, and each destination's status when the broadcast ended.</p>
+                <div id="historySummary" class="hint" style="margin-top: -8px;"></div>
+                <div id="historyList" class="destination-list">
+                    <div class="empty-state">Loading…</div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Active sessions</h2>
+                <p class="hint">Every device currently signed in to your account. Revoke any you don't recognize — a forwarded or leaked sign-in link can be killed here without logging out this device.</p>
+                <div id="sessionList" class="destination-list">
+                    <div class="empty-state">Loading…</div>
+                </div>
+            </section>
+
+            <section class="card">
                 <h2>Watch page</h2>
                 <p class="hint">Every stream also plays here with live chat — no transcoding, straight passthrough.</p>
                 <div class="credential-row">
@@ -89,6 +113,7 @@
 
     <footer class="site-footer">
         <ul class="site-footer-nav">
+            <li><a href="/vs/">Compare vs competitors</a></li>
             <li><a href="https://vcpeer.com">VCPeer video calls</a></li>
             <li><a href="https://share.vcpeer.com">VCPeer Send (file transfer)</a></li>
             <li><a href="https://book.vcpeer.com/admin/30min">VCPeer scheduling</a></li>
