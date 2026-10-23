@@ -22,6 +22,19 @@
     );
   }
 
+  const DEST_STATE_LABEL = {
+    pushing: 'Receiving',
+    retrying: 'Reconnecting',
+    failed: 'Not receiving',
+    stopped: 'Idle',
+  };
+
+  function destStatusDot(entry) {
+    const state = (entry && entry.state) || 'stopped';
+    const label = DEST_STATE_LABEL[state] || 'Idle';
+    return `<span class="dest-status dest-status--${state}" title="${label}"><span class="dot"></span>${label}</span>`;
+  }
+
   function showToast(text) {
     const toast = document.getElementById('toast');
     toast.textContent = text;
@@ -66,6 +79,7 @@
           <div class="destination-meta">
             <div class="label">${d.label}</div>
             <div class="url">${d.rtmpUrl} • key ${d.streamKeyMasked}</div>
+            <div class="dest-status" data-dest-status="${d.id}" style="display: none;"></div>
           </div>
         </div>
         <div class="destination-actions">
@@ -90,6 +104,21 @@
       pill.classList.remove('live');
       pill.innerHTML = '<span class="dot"></span> Offline';
     }
+
+    const byId = {};
+    (data.destinations || []).forEach((entry) => {
+      byId[entry.id] = entry;
+    });
+    document.querySelectorAll('[data-dest-status]').forEach((el) => {
+      const entry = byId[el.dataset.destStatus];
+      if (!data.live || !entry) {
+        el.style.display = 'none';
+        el.innerHTML = '';
+        return;
+      }
+      el.style.display = '';
+      el.innerHTML = destStatusDot(entry);
+    });
   }
 
   document.getElementById('addDestinationForm').addEventListener('submit', async (event) => {

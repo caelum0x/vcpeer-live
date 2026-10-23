@@ -1,6 +1,6 @@
 #!/bin/sh
 # Runs when a path under live/<ingestKey> gets its first publisher
-# (MediaMTX's runOnReady hook). Reads the control app's destinations
+# (MediaMTX's runOnAvailable hook). Reads the control app's destinations
 # file for this ingest key and spawns one `ffmpeg -c copy` passthrough
 # push per enabled destination, plus one into Owncast. No transcoding -
 # literally the same bytes, re-muxed into FLV/RTMP.
@@ -40,7 +40,7 @@ RETRY_BACKOFF_SECONDS="${FANOUT_RETRY_BACKOFF_SECONDS:-2}"
 
 mkdir -p "$SHARED_DIR"
 : > "$PID_FILE"
-echo "{\"live\":true,\"startedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"destinations\":[]}" > "$STATUS_FILE"
+echo "{\"live\":true,\"startedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$STATUS_FILE"
 
 if [ ! -f "$DEST_FILE" ]; then
   echo "fanout: no destinations file for $INGEST_KEY yet ($DEST_FILE) - only passthrough happens until one is armed"
@@ -51,7 +51,7 @@ fi
 # RETRY_WINDOW_SECONDS of starting. Root cause: this self-read
 # (`ffmpeg -i rtmp://localhost:1935/<path>`) starts reading the
 # just-published stream from nearly its first byte, moments after
-# MediaMTX's runOnReady hook fires - the H.264 SPS/PPS extradata isn't
+# MediaMTX's runOnAvailable hook fires - the H.264 SPS/PPS extradata isn't
 # always available yet, so the demuxer gives up and the push dies a few
 # seconds in with a broken pipe even with -analyzeduration/-probesize
 # raised. That's a transient startup race, not a real end of stream, so
@@ -62,11 +62,32 @@ fi
 # fanout-stop.sh killing this function's pid (recorded in PID_FILE below)
 # stops the retry loop immediately instead of respawning ffmpeg after an
 # intentional stop.
+#
+# Each destination also gets its own `<ingestKey>.<id>.state` JSON file,
+# rewritten on every state transition (pushing/retrying/failed/stopped),
+# so the control app's GET /api/live/status can tell a broadcaster which
+# specific platform stopped receiving instead of only "Live"/"Offline"
+# for the whole broadcast. Keyed by `id` (not `platform`) because a user
+# can have two destinations on the same platform - `id` is the only
+# field guaranteed unique per line of $DEST_FILE.
+write_state() {
+  state_file="$SHARED_DIR/${INGEST_KEY}.${id}.state"
+  err_json="null"
+  if [ -n "${3:-}" ]; then
+    err_escaped=$(printf '%s' "$3" | tr -d '\n' | sed 's/\\/\\\\/g; s/"/\\"/g')
+    err_json="\"$err_escaped\""
+  fi
+  cat > "$state_file" <<EOF
+{"id":"$id","platform":"$platform","label":"$label","state":"$1","attempt":$2,"lastError":$err_json,"updatedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+EOF
+}
+
 push_one() {
-  platform="$1"
-  label="$2"
-  target="$3"
-  log_file="$SHARED_DIR/${INGEST_KEY}.${platform}.log"
+  id="$1"
+  platform="$2"
+  label="$3"
+  target="$4"
+  log_file="$SHARED_DIR/${INGEST_KEY}.${id}.log"
   attempt=0
   stopping=0
   child_pid=""
@@ -74,6 +95,7 @@ push_one() {
 
   while [ "$stopping" -eq 0 ]; do
     attempt=$((attempt + 1))
+    write_state "pushing" "$attempt"
     echo "fanout: pushing $MTX_PATH -> $platform ($label), attempt $attempt/$MAX_RETRIES" >>"$log_file"
     start_ts=$(date +%s)
     # `-map 0` forces every stream the demuxer found (video + audio) into
@@ -99,8 +121,14 @@ push_one() {
       status=$?
     fi
     child_pid=""
-    [ "$stopping" -eq 1 ] && break
-    [ "$status" -eq 0 ] && break
+    if [ "$stopping" -eq 1 ]; then
+      write_state "stopped" "$attempt" "stopped: source ended"
+      break
+    fi
+    if [ "$status" -eq 0 ]; then
+      write_state "stopped" "$attempt" ""
+      break
+    fi
     elapsed=$(($(date +%s) - start_ts))
     if [ "$elapsed" -ge "$RETRY_WINDOW_SECONDS" ]; then
       # This push ran stably for a while before dying - a mid-stream drop
@@ -115,31 +143,30 @@ push_one() {
       # rather than permanently dropping this one platform for the rest
       # of a broadcast that might otherwise run for hours.
       echo "fanout: $platform push ended after ${elapsed}s - mid-stream drop, reconnecting with a fresh retry budget" >>"$log_file"
+      write_state "retrying" "$attempt" "mid-stream drop after ${elapsed}s, reconnecting"
       attempt=0
       sleep "$RETRY_BACKOFF_SECONDS"
       continue
     fi
     if [ "$attempt" -ge "$MAX_RETRIES" ]; then
       echo "fanout: $platform push failed after $attempt attempts within ${elapsed}s each, giving up" >>"$log_file"
+      write_state "failed" "$attempt" "failed after $attempt attempts within ${elapsed}s each"
       break
     fi
     echo "fanout: $platform push died after ${elapsed}s (attempt $attempt/$MAX_RETRIES) - retrying in ${RETRY_BACKOFF_SECONDS}s" >>"$log_file"
+    write_state "retrying" "$attempt" "died after ${elapsed}s, retrying in ${RETRY_BACKOFF_SECONDS}s"
     sleep "$RETRY_BACKOFF_SECONDS"
   done
 }
 
-names=""
-sep=""
-while IFS='|' read -r platform label target; do
-  [ -z "$platform" ] && continue
-  push_one "$platform" "$label" "$target" &
+while IFS='|' read -r id platform label target; do
+  [ -z "$id" ] && continue
+  push_one "$id" "$platform" "$label" "$target" &
   echo "$!" >> "$PID_FILE"
-  names="${names}${sep}\"${platform}\""
-  sep=","
 done < "$DEST_FILE"
 
-echo "{\"live\":true,\"startedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"destinations\":[${names}]}" > "$STATUS_FILE"
+echo "{\"live\":true,\"startedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$STATUS_FILE"
 
-# runOnReady must stay in the foreground for MediaMTX to track the hook's
+# runOnAvailable must stay in the foreground for MediaMTX to track the hook's
 # lifetime; wait on the background ffmpeg jobs we just started.
 wait

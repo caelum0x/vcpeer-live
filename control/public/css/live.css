@@ -248,6 +248,39 @@ body {
     font-family: var(--ds-font-mono);
 }
 
+.dest-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--ds-neutral-300);
+}
+
+.dest-status .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.dest-status--pushing {
+    color: var(--ds-success);
+}
+
+.dest-status--retrying {
+    color: var(--ds-warning);
+}
+
+.dest-status--failed {
+    color: var(--ds-danger);
+}
+
+.dest-status--stopped {
+    color: var(--ds-neutral-500);
+}
+
 .destination-actions {
     display: flex;
     align-items: center;

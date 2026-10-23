@@ -2,13 +2,13 @@
 #
 # Users publish once to rtmp://<host>:1935/live/<ingestKey> (OBS) or
 # POST a WHIP offer to http://<host>:8889/live/<ingestKey>/whip (browser,
-# no OBS). On the first track arriving, runOnReady runs fanout.sh, which
+# no OBS). On the first track arriving, runOnAvailable runs fanout.sh, which
 # reads the control app's per-user destinations file from the shared
 # volume and pushes a `ffmpeg -c copy` passthrough (no re-encode) to
 # Owncast and to every enabled external RTMP(S) destination.
 #
 # Adopted, not hand-written: this is bluenviron/mediamtx's own
-# runOnReady hook mechanism (see deploy/RUNBOOK.md) - the only custom
+# runOnAvailable hook mechanism (see deploy/RUNBOOK.md) - the only custom
 # code here is the ~30-line shell script that builds the ffmpeg command
 # lines from our data.
 

@@ -40,19 +40,24 @@ function regenerateIngestKey(data, userId) {
  * MediaMTX container is minimal (ffmpeg added, no JSON tooling) and this
  * format is trivial to parse with `read -r` in a POSIX shell.
  *
- * Each line: platform|label|host:port-free-rtmp-url-with-key
+ * Each line: id|platform|label|host:port-free-rtmp-url-with-key
+ * `id` is `dest.id` (or the literal "owncast" for the always-on internal
+ * push) and is what fanout.sh uses to name this destination's per-push
+ * status file - platform alone is not unique (a user can have two Twitch
+ * destinations), so keying status files by platform would let one
+ * destination's state clobber another's.
  * The decrypted destination stream key is appended to the URL here, in
  * memory, right before writing the file - never logged, never returned
  * to any HTTP response.
  */
 function writeFanoutFile({ sharedDir, ingestKey, ownCastStreamKey, destinations, encryptionKey }) {
-  const lines = [`owncast|Owncast|rtmp://owncast:1935/live/${ownCastStreamKey}`];
+  const lines = [`owncast|owncast|Owncast|rtmp://owncast:1935/live/${ownCastStreamKey}`];
   let armedCount = 0;
   for (const dest of destinations) {
     if (!dest.enabled) continue;
     const plainKey = decryptStreamKey(dest.encryptedKey, encryptionKey);
     const base = dest.rtmpUrl.endsWith('/') ? dest.rtmpUrl.slice(0, -1) : dest.rtmpUrl;
-    lines.push(`${dest.platform}|${dest.label}|${base}/${plainKey}`);
+    lines.push(`${dest.id}|${dest.platform}|${dest.label}|${base}/${plainKey}`);
     armedCount += 1;
   }
   if (!fs.existsSync(sharedDir)) fs.mkdirSync(sharedDir, { recursive: true });
@@ -64,15 +69,56 @@ function writeFanoutFile({ sharedDir, ingestKey, ownCastStreamKey, destinations,
   return { file, count: lines.length, armedCount };
 }
 
-/** Reads MediaMTX's status file (written by fanout.sh) for a given ingest key, if present. */
+/**
+ * Reads MediaMTX's status file (written by fanout.sh/fanout-stop.sh) for
+ * the overall live/offline flag, plus one per-destination health entry
+ * per `<ingestKey>.<destinationId>.state` file fanout.sh writes on every
+ * push state transition (pushing/retrying/failed/stopped). The internal
+ * Owncast push (id "owncast") is never a user-configured destination, so
+ * it is excluded from the returned list - same convention as
+ * `armedCount` above.
+ */
 function readFanoutStatus({ sharedDir, ingestKey }) {
   const file = path.join(sharedDir, `${ingestKey}.status`);
-  if (!fs.existsSync(file)) return { live: false, destinations: [] };
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return { live: false, destinations: [] };
+  let base = { live: false };
+  if (fs.existsSync(file)) {
+    try {
+      base = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      base = { live: false };
+    }
   }
+  const destinations = readDestinationStates({ sharedDir, ingestKey });
+  return {
+    live: Boolean(base.live),
+    ...(base.startedAt ? { startedAt: base.startedAt } : {}),
+    destinations,
+  };
+}
+
+/**
+ * Collects every `<ingestKey>.<destinationId>.state` file fanout.sh has
+ * written for this broadcast. Each destination writes only its own file
+ * (named by its unique id, never by platform), so there is no
+ * cross-process write race to guard against here - a corrupt/mid-write
+ * file is just skipped and picked up correctly on the next 5s poll.
+ */
+function readDestinationStates({ sharedDir, ingestKey }) {
+  if (!fs.existsSync(sharedDir)) return [];
+  const prefix = `${ingestKey}.`;
+  const suffix = '.state';
+  const entries = [];
+  for (const name of fs.readdirSync(sharedDir)) {
+    if (!name.startsWith(prefix) || !name.endsWith(suffix)) continue;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(sharedDir, name), 'utf8'));
+      if (parsed.id === 'owncast') continue;
+      entries.push(parsed);
+    } catch {
+      // Skip a file fanout.sh is mid-write on - the next poll re-reads it.
+    }
+  }
+  return entries.sort((a, b) => (a.label > b.label ? 1 : a.label < b.label ? -1 : 0));
 }
 
 /**
