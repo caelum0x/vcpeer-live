@@ -20,7 +20,15 @@ class JsonStore {
     const dir = path.dirname(this.filePath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     if (!fs.existsSync(this.filePath)) {
-      this._write({ users: [], magicLinks: [], sessions: [], destinations: [], ingestKeys: [] });
+      this._write({
+        users: [],
+        magicLinks: [],
+        sessions: [],
+        destinations: [],
+        ingestKeys: [],
+        broadcasts: [],
+        failureAlerts: [],
+      });
     }
   }
 

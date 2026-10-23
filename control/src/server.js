@@ -8,7 +8,11 @@ const { JsonStore } = require('./lib/store');
 const { buildAuthRouter } = require('./routes/auth');
 const { buildDestinationsRouter } = require('./routes/destinations');
 const { buildLiveRouter } = require('./routes/live');
+const { buildBroadcastsRouter } = require('./routes/broadcasts');
+const { buildOauthRouter } = require('./routes/oauth');
 const { resolveSession } = require('./lib/auth');
+const { checkFailuresAndNotify } = require('./lib/healthAlerts');
+const { sendStreamFailureEmail } = require('./lib/mailer');
 
 function createApp(overrides = {}) {
   const isDev = (process.env.VCPEER_LIVE_ENV || 'dev') === 'dev';
@@ -24,7 +28,10 @@ function createApp(overrides = {}) {
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
-  app.use(express.static(path.join(__dirname, '..', 'public')));
+  // `extensions: ['html']` lets clean URLs like /vs/restream resolve to
+  // vs/restream.html on disk - the comparison pages link to each other and
+  // appear in the sitemap without a .html suffix.
+  app.use(express.static(path.join(__dirname, '..', 'public'), { extensions: ['html'] }));
 
   app.get('/healthz', (req, res) => res.json({ ok: true }));
 
@@ -40,6 +47,8 @@ function createApp(overrides = {}) {
     '/api/live',
     buildLiveRouter(store, { rtmpPublicUrl, whipPublicUrl, sharedDir, ownCastStreamKey })
   );
+  app.use('/api/broadcasts', buildBroadcastsRouter(store));
+  app.use('/api/oauth', buildOauthRouter(store, { publicUrl }));
 
   app.get('/live', (req, res) => {
     res.sendFile(path.join(__dirname, '..', 'public', 'live.html'));
@@ -55,11 +64,32 @@ function createApp(overrides = {}) {
 }
 
 if (require.main === module) {
-  const { app } = createApp();
+  const { app, store } = createApp();
   const port = Number(process.env.PORT || 4000);
   app.listen(port, () => {
     console.log(`VCPeer Live control app listening on :${port}`);
   });
+
+  // Independent of any open dashboard tab (the 5s /api/live/status poll
+  // only runs while someone is looking at /live) - this is what actually
+  // notices a destination that silently died mid-broadcast and emails
+  // the signed-in user. Only started for the real server process, never
+  // inside createApp() itself, so importing createApp() in a script or a
+  // future test never leaves a background timer running.
+  const sharedDir = process.env.FANOUT_SHARED_DIR || path.join(__dirname, '..', 'data', 'shared');
+  const healthAlertIntervalMs = Number(process.env.HEALTH_ALERT_INTERVAL_MS || 15000);
+  setInterval(() => {
+    checkFailuresAndNotify(store.get(), { sharedDir, sendEmail: sendStreamFailureEmail })
+      .then(({ data, sent }) => {
+        store.update(() => data);
+        if (sent.length) {
+          console.log(`vcpeer-live health-alerts: sent ${sent.length} failure alert(s)`);
+        }
+      })
+      .catch((err) => {
+        console.error('vcpeer-live health-alerts: check failed:', err.message);
+      });
+  }, healthAlertIntervalMs);
 }
 
 module.exports = { createApp };
