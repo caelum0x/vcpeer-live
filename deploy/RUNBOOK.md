@@ -13,11 +13,14 @@ had ever shipped. It has since actually shipped and is live:
   ufw and the box's OCI Security List.
 - Deployed at `/opt/infra-box/stacks/vcpeer-live` on the box via manual
   rsync + `docker compose --env-file /etc/products/vcpeer-live.env build/up`
-  - there is no `.git` checkout there and no deploy script, so a fresh
-    `git clone` per "Steps" below would create a second, conflicting
-    deployment. To ship a change: rsync the changed files into that path,
-    rebuild the affected service(s), `up -d` them - see
-    `NOTES.md` for the exact command sequence used 2026-10-22.
+  - there is no `.git` checkout there, so a fresh `git clone` per "Steps"
+    below would create a second, conflicting deployment. To ship a
+    change: run `deploy/redeploy.sh` (control, mediamtx, or both) from a
+    checkout of this repo - it's the exact manual rsync + rebuild
+    sequence from `NOTES.md` (2026-10-22), written down as a repeatable
+    script instead of re-derived from memory each time. Add `--dry-run`
+    to see the commands without running them. Not CI/CD - run it by hand
+    whenever `main` has shipped fixes that haven't been deployed yet.
 - The `SMTP_USER`/`SMTP_PASS`/`OWNCAST_ADMIN_PASSWORD` placeholders this
   file's "Steps" section says to fill in are already filled in on the box
   at `/etc/products/vcpeer-live.env`. The one real gap found 2026-10-22 -

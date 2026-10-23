@@ -54,11 +54,12 @@ Two real problems found and fixed live on 2026-10-22, in order of severity:
 
 **This repo has no deploy automation and no `.git` checkout on the box** -
 every past deploy (including this one) was a manual rsync + rebuild, which
-is exactly how it silently drifted 6 days out of date. A real follow-up
-(not done here, genuinely new scope): either a small deploy script in this
-repo (`deploy/redeploy.sh` - rsync + `docker compose build/up` for `box`)
-or a periodic drift check comparing the box's running `control/src` against
-`origin/main`, so the next set of merged fixes doesn't sit undeployed again.
+is exactly how it silently drifted 6 days out of date. Follow-up shipped
+2026-10-23: `deploy/redeploy.sh` - a plain shell script (not CI/CD) that
+runs this same rsync + `docker compose build/up` sequence for `box`,
+targeting `control`, `mediamtx`, or both, with a `--dry-run` mode. A
+periodic drift check comparing the box's running `control/src` against
+`origin/main` is still a real, not-yet-built follow-up on top of this.
 
 ## VCPeer Book cross-link gap (not fixed, disproportionate to fix)
 
