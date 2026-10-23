@@ -447,7 +447,121 @@ body {
     transform: translateY(0);
 }
 
+.vs-main {
+    width: 100%;
+    max-width: 820px;
+    margin: 0 auto;
+    padding: var(--ds-space-8) var(--ds-space-6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--ds-space-7);
+}
+
+.vs-hero h1 {
+    font-size: 1.8rem;
+    color: var(--ds-neutral-0);
+    margin-bottom: var(--ds-space-3);
+}
+
+.vs-hero p {
+    color: var(--ds-neutral-300);
+    font-size: 1rem;
+    line-height: 1.6;
+}
+
+.vs-breadcrumb {
+    font-size: 0.8rem;
+    color: var(--ds-neutral-500);
+}
+
+.vs-breadcrumb a {
+    color: var(--ds-neutral-500);
+    text-decoration: none;
+}
+
+.vs-breadcrumb a:hover {
+    color: var(--ds-neutral-0);
+}
+
+.vs-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+}
+
+.vs-table th,
+.vs-table td {
+    text-align: left;
+    padding: var(--ds-space-3) var(--ds-space-4);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    vertical-align: top;
+}
+
+.vs-table th {
+    color: var(--ds-neutral-300);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.vs-table td.win {
+    color: var(--ds-success);
+    font-weight: 600;
+}
+
+.vs-table tr:last-child td {
+    border-bottom: none;
+}
+
+.vs-callout {
+    border: 1px solid rgba(231, 76, 60, 0.3);
+    background: rgba(231, 76, 60, 0.08);
+    border-radius: var(--ds-radius-md);
+    padding: var(--ds-space-5);
+    color: var(--ds-neutral-50);
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+
+.vs-callout strong {
+    color: var(--ds-danger);
+}
+
+.vs-cta {
+    text-align: center;
+    padding: var(--ds-space-6) 0;
+}
+
+.vs-grid-links {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--ds-space-4);
+}
+
+.vs-grid-links a {
+    display: block;
+    padding: var(--ds-space-5);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--ds-radius-md);
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--ds-neutral-0);
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.vs-grid-links a:hover {
+    border-color: var(--ds-brand-600);
+}
+
 @media (max-width: 480px) {
+    .vs-grid-links {
+        grid-template-columns: 1fr;
+    }
+
+    .vs-table {
+        font-size: 0.78rem;
+    }
+
     .live-main {
         padding: var(--ds-space-6) var(--ds-space-4);
     }
