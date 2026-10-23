@@ -11,6 +11,16 @@
 # sequence, written down once, so it's repeatable and diffable instead of
 # re-derived from memory each time.
 #
+# `$BOX_PATH` is root-owned on `box` (from an earlier manual `sudo`
+# rsync - see NOTES.md, 2026-10-24) while the SSH key this script uses
+# logs in as an unprivileged `deploy` user, so every file write below
+# goes rsync-to-a-deploy-owned-staging-dir, then `ssh ... sudo cp -r`
+# into place - a direct `rsync ... "$BOX_HOST:$BOX_PATH/..."` here hits
+# `Permission denied` (confirmed 2026-10-24). `docker compose` itself
+# does NOT need sudo (the deploy user is in the `docker` group) and the
+# root-owned tree is world-readable, so only the two `cp`/`mkdir` steps
+# below need it.
+#
 # Usage:
 #   deploy/redeploy.sh              # rsync + rebuild + restart everything
 #   deploy/redeploy.sh control      # only the control app (fast path)
@@ -50,30 +60,49 @@ echo "vcpeer-live redeploy: target=$TARGET box=$BOX_HOST path=$BOX_PATH dry_run=
 
 TS="$(date -u +%Y%m%d-%H%M%S)"
 BACKUP_DIR="$BACKUP_ROOT/vcpeer-live-pre-redeploy-$TS"
+STAGING_DIR="/tmp/vcpeer-live-redeploy-staging-$TS"
+
+run ssh "$BOX_HOST" "mkdir -p '$STAGING_DIR'"
+
+# docker-compose.yml itself (e.g. a new env var added to a service's
+# `environment:` block) was never synced by this script before
+# 2026-10-24 - a compose-file-only change would silently never reach
+# `box` no matter how many times you ran this. Always sync it,
+# regardless of target, since it affects every service's container.
+run rsync -az "$REPO_ROOT/docker-compose.yml" "$BOX_HOST:$STAGING_DIR/docker-compose.yml"
+run ssh "$BOX_HOST" "sudo cp '$STAGING_DIR/docker-compose.yml' '$BOX_PATH/docker-compose.yml' && sudo chown root:root '$BOX_PATH/docker-compose.yml'"
 
 case "$TARGET" in
   all|control)
-    run ssh "$BOX_HOST" "mkdir -p '$BACKUP_DIR/control' && cp -r '$BOX_PATH/control/src' '$BOX_PATH/control/public' '$BACKUP_DIR/control/' 2>/dev/null || true"
-    run rsync -az --delete \
-      "$REPO_ROOT/control/src/" "$BOX_HOST:$BOX_PATH/control/src/"
-    run rsync -az --delete \
-      "$REPO_ROOT/control/public/" "$BOX_HOST:$BOX_PATH/control/public/"
+    run ssh "$BOX_HOST" "sudo mkdir -p '$BACKUP_DIR/control' && sudo cp -r '$BOX_PATH/control/src' '$BOX_PATH/control/public' '$BACKUP_DIR/control/' 2>/dev/null || true"
+    run ssh "$BOX_HOST" "mkdir -p '$STAGING_DIR/control-extra'"
+    run rsync -az "$REPO_ROOT/control/src/" "$BOX_HOST:$STAGING_DIR/control-src/"
+    run rsync -az "$REPO_ROOT/control/public/" "$BOX_HOST:$STAGING_DIR/control-public/"
     run rsync -az \
       "$REPO_ROOT/control/package.json" "$REPO_ROOT/control/package-lock.json" "$REPO_ROOT/control/Dockerfile" \
-      "$BOX_HOST:$BOX_PATH/control/"
+      "$BOX_HOST:$STAGING_DIR/control-extra/"
+    run ssh "$BOX_HOST" "sudo rsync -a --delete '$STAGING_DIR/control-src/' '$BOX_PATH/control/src/' && \
+      sudo rsync -a --delete '$STAGING_DIR/control-public/' '$BOX_PATH/control/public/' && \
+      sudo cp '$STAGING_DIR/control-extra/package.json' '$STAGING_DIR/control-extra/package-lock.json' '$STAGING_DIR/control-extra/Dockerfile' '$BOX_PATH/control/' && \
+      sudo chown -R root:root '$BOX_PATH/control'"
     ;;
 esac
 
 case "$TARGET" in
   all|mediamtx)
-    run ssh "$BOX_HOST" "mkdir -p '$BACKUP_DIR/mediamtx' && cp -r '$BOX_PATH/mediamtx/scripts' '$BACKUP_DIR/mediamtx/' 2>/dev/null || true"
-    run rsync -az --delete \
-      "$REPO_ROOT/mediamtx/scripts/" "$BOX_HOST:$BOX_PATH/mediamtx/scripts/"
+    run ssh "$BOX_HOST" "sudo mkdir -p '$BACKUP_DIR/mediamtx' && sudo cp -r '$BOX_PATH/mediamtx/scripts' '$BACKUP_DIR/mediamtx/' 2>/dev/null || true"
+    run ssh "$BOX_HOST" "mkdir -p '$STAGING_DIR/mediamtx-extra'"
+    run rsync -az "$REPO_ROOT/mediamtx/scripts/" "$BOX_HOST:$STAGING_DIR/mediamtx-scripts/"
     run rsync -az \
       "$REPO_ROOT/mediamtx/mediamtx.yml" "$REPO_ROOT/mediamtx/Dockerfile" \
-      "$BOX_HOST:$BOX_PATH/mediamtx/"
+      "$BOX_HOST:$STAGING_DIR/mediamtx-extra/"
+    run ssh "$BOX_HOST" "sudo rsync -a --delete '$STAGING_DIR/mediamtx-scripts/' '$BOX_PATH/mediamtx/scripts/' && \
+      sudo cp '$STAGING_DIR/mediamtx-extra/mediamtx.yml' '$STAGING_DIR/mediamtx-extra/Dockerfile' '$BOX_PATH/mediamtx/' && \
+      sudo chown -R root:root '$BOX_PATH/mediamtx'"
     ;;
 esac
+
+run ssh "$BOX_HOST" "rm -rf '$STAGING_DIR'"
 
 BUILD_SERVICES=""
 case "$TARGET" in
