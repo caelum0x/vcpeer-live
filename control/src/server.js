@@ -12,6 +12,7 @@ const { buildBroadcastsRouter } = require('./routes/broadcasts');
 const { buildOauthRouter } = require('./routes/oauth');
 const { buildBillingRouter, buildBillingWebhookHandler } = require('./routes/billing');
 const { buildTeamRouter } = require('./routes/team');
+const { buildVodsRouter, buildVodStreamRouter } = require('./routes/vods');
 const { resolveSession } = require('./lib/auth');
 const { checkFailuresAndNotify } = require('./lib/healthAlerts');
 const { sendStreamFailureEmail } = require('./lib/mailer');
@@ -58,6 +59,10 @@ function createApp(overrides = {}) {
   app.use('/api/oauth', buildOauthRouter(store, { publicUrl }));
   app.use('/api/billing', buildBillingRouter(store, { publicUrl }));
   app.use('/api/team', buildTeamRouter(store, { publicUrl, isDev }));
+  app.use('/api/vods', buildVodsRouter(store, { sharedDir, publicUrl }));
+  // Mounted separately from /api/vods (no requireAuth) - see
+  // routes/vods.js buildVodStreamRouter's header comment.
+  app.use('/vods', buildVodStreamRouter({ sharedDir }));
 
   app.get('/live', (req, res) => {
     res.sendFile(path.join(__dirname, '..', 'public', 'live.html'));

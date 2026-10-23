@@ -357,6 +357,78 @@
       showToast('Broadcast marked finished in your history.');
     }
     await loadHistory();
+    await loadVods();
+  });
+
+  // --- Recordings (VOD, Pro only) ---
+
+  function formatBytes(bytes) {
+    if (!bytes) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
+  }
+
+  async function loadVods() {
+    const card = document.getElementById('vodsCard');
+    const hint = document.getElementById('vodsHint');
+    const list = document.getElementById('vodsList');
+    card.style.display = 'block';
+    const res = await api('/api/vods');
+    if (res.status === 403) {
+      hint.textContent = 'Upgrade to Pro to automatically record every broadcast.';
+      list.innerHTML = '<div class="empty-state">No recordings - recording is a Pro feature.</div>';
+      return;
+    }
+    const data = await res.json();
+    hint.textContent = 'Pro automatically records every broadcast - download or play back a past stream here.';
+    const recordings = data.recordings || [];
+    if (!recordings.length) {
+      list.innerHTML = '<div class="empty-state">No recordings yet - go live once and it will show up here.</div>';
+      return;
+    }
+    list.innerHTML = recordings
+      .map((r) => {
+        const parts = r.segments
+          .map(
+            (s) =>
+              `<a class="btn btn-ghost" href="${s.url}" target="_blank" rel="noopener" style="margin-right: 8px;" title="Part ${s.segment} - ${formatBytes(s.sizeBytes)}">&#9654; Part ${s.segment}</a>`
+          )
+          .join('');
+        return `
+      <div class="destination-row" style="align-items: flex-start;" data-broadcast-id="${r.broadcastId}">
+        <div class="destination-info" style="flex-direction: column; align-items: flex-start; gap: 4px;">
+          <div class="destination-meta">
+            <div class="label">${formatClock(r.startedAt)}</div>
+            <div class="url">${formatDuration(r.durationMs)} · ${formatBytes(r.sizeBytes)} · ${r.segments.length} part(s)</div>
+            <div style="margin-top: 8px;">${parts}</div>
+          </div>
+        </div>
+        <div class="destination-actions">
+          <button class="btn btn-danger" data-action="delete-vod" data-id="${r.broadcastId}" title="Delete this recording">&#10005;</button>
+        </div>
+      </div>`;
+      })
+      .join('');
+  }
+
+  document.getElementById('vodsList').addEventListener('click', async (event) => {
+    const btn = event.target.closest('button[data-action="delete-vod"]');
+    if (!btn) return;
+    const confirmed = window.confirm('Delete this recording? This cannot be undone.');
+    if (!confirmed) return;
+    const res = await api(`/api/vods/${btn.dataset.id}`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 204) {
+      showToast('Could not delete that recording.');
+      return;
+    }
+    showToast('Recording deleted.');
+    await loadVods();
   });
 
   function formatSessionDate(iso) {
@@ -614,6 +686,7 @@
     await initTwitchConnect();
     await loadBilling();
     await loadTeam();
+    await loadVods();
     await consumePendingInviteIfAny();
     // Accepting an invite (or returning from checkout) can change which
     // destinations/credentials/history this account now shares - reload
@@ -634,6 +707,7 @@
           clearInterval(poll);
           if (billing.plan === 'pro') {
             await loadTeam();
+            await loadVods();
             showToast("You're on Pro now.");
           }
         }

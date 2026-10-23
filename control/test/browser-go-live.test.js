@@ -201,6 +201,19 @@ async function main() {
 
     console.log('\nPASS: "Go live from browser" now arms destinations (POST /api/live/go) before WHIP publish.');
     console.log('Destinations file written to:', destFile);
+
+    // live.js's init() IIFE is never awaited by this test (it runs as a
+    // real unhandled-by-us background chain, same as in a real browser
+    // tab) - it keeps firing further fetches (loadBilling/loadTeam/
+    // loadVods/etc.) well after the assertions above already have what
+    // they need. Give that tail time to finish BEFORE the `finally`
+    // below tears down the server and deletes dataDir/sharedDir -
+    // otherwise a fetch that's still in flight hits a now-closed server
+    // or an already-deleted db.json, throws an uncaught "fetch failed"/
+    // ENOENT inside that unawaited chain, and crashes the whole process
+    // with an unhandled rejection despite every assertion above having
+    // already passed.
+    await new Promise((r) => setTimeout(r, 400));
   } finally {
     server.close();
     fs.rmSync(dataDir, { recursive: true, force: true });

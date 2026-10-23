@@ -112,7 +112,10 @@ function readDestinationStates({ sharedDir, ingestKey }) {
     if (!name.startsWith(prefix) || !name.endsWith(suffix)) continue;
     try {
       const parsed = JSON.parse(fs.readFileSync(path.join(sharedDir, name), 'utf8'));
-      if (parsed.id === 'owncast') continue;
+      // "owncast" and "vod" are internal legs fanout.sh always/
+      // conditionally starts, never a user-configured destination -
+      // excluded here for the same reason armedCount excludes them.
+      if (parsed.id === 'owncast' || parsed.id === 'vod') continue;
       entries.push(parsed);
     } catch {
       // Skip a file fanout.sh is mid-write on - the next poll re-reads it.
@@ -142,10 +145,86 @@ function removeFanoutArtifacts({ sharedDir, ingestKey }) {
   }
 }
 
+/**
+ * Arms (or disarms) VOD recording for the broadcast about to go live.
+ * fanout.sh reads `<ingestKey>.record` on the SAME runOnReady hook that
+ * reads `<ingestKey>.destinations` - if present, it starts a third
+ * `ffmpeg -c copy` leg (alongside Owncast and the user's own
+ * destinations) that self-reads the just-published RTMP source into a
+ * local file instead of pushing it anywhere, named after the broadcast
+ * id so routes/vods.js can match recordings back to broadcast-history
+ * rows with no extra bookkeeping. Recording is Pro-gated (see
+ * routes/live.js) - `removeRecordFlag` is called on every /go for a
+ * free/lapsed user so a stale flag from an earlier Pro period can never
+ * silently keep recording after a downgrade.
+ */
+function writeRecordFlag({ sharedDir, ingestKey, broadcastId }) {
+  if (!fs.existsSync(sharedDir)) fs.mkdirSync(sharedDir, { recursive: true });
+  const file = path.join(sharedDir, `${ingestKey}.record`);
+  fs.writeFileSync(file, broadcastId, { mode: 0o600 });
+}
+
+function removeRecordFlag({ sharedDir, ingestKey }) {
+  const file = path.join(sharedDir, `${ingestKey}.record`);
+  fs.rmSync(file, { force: true });
+}
+
+// fanout.sh names each recording file `<broadcastId>.<segment>.mp4`,
+// starting a new segment (never overwriting one already on disk) every
+// time the recording leg restarts - the SPS/PPS startup race or a
+// mid-stream network blip must never truncate or corrupt bytes already
+// written for that broadcast. One broadcast can therefore have several
+// segment files; the route layer presents them as one logical recording.
+const VOD_SEGMENT_PATTERN = /^(.+)\.(\d+)\.mp4$/;
+
+/**
+ * Lists recorded segment files for one broadcast, ascending by segment
+ * number. Returns `[]` (not an error) if recording was never armed for
+ * this broadcast, the broadcast predates this feature, or the vods
+ * directory doesn't exist yet - every one of those is a normal, expected
+ * case, not a fault. Zero-byte segments are skipped: fanout.sh creates a
+ * fresh segment file on every (re)start of the recording leg, including
+ * one that dies within the SPS/PPS startup-race window below (see
+ * fanout.sh's `record_one`) before ffmpeg has written anything at all -
+ * that empty file is debris from a transient retry, never a usable
+ * recording, so it must never show up as a 0-second clip in the UI.
+ */
+function listVodSegments({ sharedDir, ingestKey, broadcastId }) {
+  const dir = path.join(sharedDir, 'vods', ingestKey);
+  if (!fs.existsSync(dir)) return [];
+  const segments = [];
+  for (const name of fs.readdirSync(dir)) {
+    const match = VOD_SEGMENT_PATTERN.exec(name);
+    if (!match || match[1] !== broadcastId) continue;
+    const stat = fs.statSync(path.join(dir, name));
+    if (stat.size === 0) continue;
+    segments.push({ segment: Number(match[2]), sizeBytes: stat.size, mtime: stat.mtime.toISOString() });
+  }
+  return segments.sort((a, b) => a.segment - b.segment);
+}
+
+/** Deletes every recorded segment for one broadcast. Returns the count removed. */
+function deleteVodSegments({ sharedDir, ingestKey, broadcastId }) {
+  const dir = path.join(sharedDir, 'vods', ingestKey);
+  if (!fs.existsSync(dir)) return 0;
+  let removed = 0;
+  for (const name of fs.readdirSync(dir)) {
+    const match = VOD_SEGMENT_PATTERN.exec(name);
+    if (!match || match[1] !== broadcastId) continue;
+    fs.rmSync(path.join(dir, name), { force: true });
+    removed += 1;
+  }
+  return removed;
+}
+
 module.exports = {
   getOrCreateIngestKey,
   regenerateIngestKey,
   writeFanoutFile,
   readFanoutStatus,
   removeFanoutArtifacts,
+  writeRecordFlag,
+  removeRecordFlag,
+  listVodSegments,
+  deleteVodSegments,
 };

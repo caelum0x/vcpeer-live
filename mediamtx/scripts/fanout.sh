@@ -165,6 +165,95 @@ while IFS='|' read -r id platform label target; do
   echo "$!" >> "$PID_FILE"
 done < "$DEST_FILE"
 
+# VOD recording (Pro-only - the control app only writes this flag file
+# for a Pro owner, see control/src/lib/live.js writeRecordFlag). Its
+# content is the broadcast id, written moments before this hook fires by
+# the SAME POST /api/live/go request that wrote $DEST_FILE above, so a
+# recording's filename maps straight back to a broadcast-history row with
+# no extra bookkeeping. A fresh, never-before-used SEGMENT file every
+# time this leg (re)starts - on the SPS/PPS startup race or a mid-stream
+# network blip alike - so a transient failure can never truncate or
+# corrupt bytes already written for this broadcast; multiple segments
+# for one broadcast is the deliberate, safe outcome of that choice.
+RECORD_FILE="$SHARED_DIR/${INGEST_KEY}.record"
+if [ -f "$RECORD_FILE" ]; then
+  BROADCAST_ID=$(cat "$RECORD_FILE")
+  VOD_DIR="$SHARED_DIR/vods/${INGEST_KEY}"
+  mkdir -p "$VOD_DIR"
+  record_one() {
+    seg=0
+    attempt=0
+    stopping=0
+    child_pid=""
+    log_file="$SHARED_DIR/${INGEST_KEY}.vod.log"
+    state_file="$SHARED_DIR/${INGEST_KEY}.vod.state"
+    trap 'stopping=1; [ -n "$child_pid" ] && kill "$child_pid" 2>/dev/null || true' TERM INT
+    while [ "$stopping" -eq 0 ]; do
+      seg=$((seg + 1))
+      attempt=$((attempt + 1))
+      out_file="$VOD_DIR/${BROADCAST_ID}.${seg}.mp4"
+      echo "{\"id\":\"vod\",\"state\":\"recording\",\"segment\":$seg,\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$state_file"
+      echo "fanout: recording $MTX_PATH -> $out_file, attempt $attempt/$MAX_RETRIES" >>"$log_file"
+      start_ts=$(date +%s)
+      # Fragmented MP4 (frag_keyframe+empty_moov), NOT +faststart, PLUS
+      # -flush_packets 1. A broadcast is normally ended by killing this
+      # process with TERM (fanout-stop.sh, when the source disconnects) -
+      # verified live against a real recording that +faststart's single
+      # trailer rewrite at the very end NEVER completes on a signal-
+      # driven stop: ffmpeg's own signal handler aborts av_write_trailer()
+      # the same way it aborts the read loop, so every TERM'd recording
+      # came out truncated with no moov atom at all (0:00 runtime,
+      # unplayable). Fragmented MP4 writes a self-contained moof/mdat
+      # pair per keyframe GOP instead of one trailer at the end - but
+      # also verified live that frag_keyframe ALONE still isn't enough:
+      # ffmpeg's own avio buffer holds each finished fragment in memory
+      # rather than writing it to disk immediately, so a kill between
+      # fragments still lost everything (observed a consistent 0-48 byte
+      # file, several keyframe intervals in, with only frag_keyframe).
+      # -flush_packets 1 forces every fragment to hit disk as soon as
+      # it's muxed - confirmed live by `kill -TERM` mid-recording then
+      # `ffmpeg -f null -i` decoding the result cleanly with no errors.
+      ffmpeg -nostdin -loglevel warning -analyzeduration 2000000 -probesize 2000000 \
+        -re -i "$SOURCE_URL" -map 0 -c copy \
+        -movflags +frag_keyframe+empty_moov+default_base_moof -flush_packets 1 "$out_file" \
+        >>"$log_file" 2>&1 &
+      child_pid=$!
+      if wait "$child_pid"; then
+        status=0
+      else
+        status=$?
+      fi
+      child_pid=""
+      if [ "$stopping" -eq 1 ]; then
+        break
+      fi
+      if [ "$status" -eq 0 ]; then
+        break
+      fi
+      elapsed=$(($(date +%s) - start_ts))
+      if [ "$elapsed" -ge "$RETRY_WINDOW_SECONDS" ]; then
+        # Recorded stably for a while before dying - a real mid-stream
+        # drop, not the startup race. Start a NEW segment (never reopen
+        # $out_file) and give it a fresh retry budget, same reasoning as
+        # push_one's mid-stream-drop branch above.
+        echo "fanout: recording ended after ${elapsed}s - mid-stream drop, starting a new segment" >>"$log_file"
+        attempt=0
+        sleep "$RETRY_BACKOFF_SECONDS"
+        continue
+      fi
+      if [ "$attempt" -ge "$MAX_RETRIES" ]; then
+        echo "fanout: recording failed after $attempt attempts within ${elapsed}s each, giving up for this broadcast" >>"$log_file"
+        break
+      fi
+      echo "fanout: recording died after ${elapsed}s (attempt $attempt/$MAX_RETRIES) - retrying in ${RETRY_BACKOFF_SECONDS}s" >>"$log_file"
+      sleep "$RETRY_BACKOFF_SECONDS"
+    done
+    echo "{\"id\":\"vod\",\"state\":\"stopped\",\"segment\":$seg,\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$state_file"
+  }
+  record_one &
+  echo "$!" >> "$PID_FILE"
+fi
+
 echo "{\"live\":true,\"startedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$STATUS_FILE"
 
 # runOnAvailable must stay in the foreground for MediaMTX to track the hook's

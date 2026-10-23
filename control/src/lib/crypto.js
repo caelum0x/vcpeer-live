@@ -67,4 +67,41 @@ function maskStreamKey(plaintext) {
   return `${'*'.repeat(Math.max(plaintext.length - 4, 4))}${plaintext.slice(-4)}`;
 }
 
-module.exports = { encryptStreamKey, decryptStreamKey, maskStreamKey };
+/**
+ * Signs a short-lived VOD download URL so a recording can be streamed/
+ * downloaded without a session cookie (so it works from a plain <video>
+ * tag, `curl`, or a link shared outside the browser session) while still
+ * requiring the SAME secret the control app already guards stream keys
+ * with - no second secret to provision or rotate. `exp` is an epoch-ms
+ * timestamp the caller picks (short window - see routes/vods.js); this
+ * function only signs, it never enforces the window itself.
+ */
+function signVodToken({ ingestKey, broadcastId, segment, exp }, rawHexKey) {
+  const key = loadKey(rawHexKey);
+  const payload = `${ingestKey}:${broadcastId}:${segment}:${exp}`;
+  return crypto.createHmac('sha256', key).update(payload).digest('hex');
+}
+
+/**
+ * Verifies a token produced by signVodToken, constant-time, and that it
+ * has not expired. Returns a boolean - never throws on a malformed token,
+ * since this gates an unauthenticated public route and a parse failure
+ * must behave exactly like "invalid token", not a 500.
+ */
+function verifyVodToken({ ingestKey, broadcastId, segment, exp, token }, rawHexKey) {
+  if (!token || typeof token !== 'string') return false;
+  const expNumber = Number(exp);
+  if (!Number.isFinite(expNumber) || Date.now() > expNumber) return false;
+  let expected;
+  try {
+    expected = signVodToken({ ingestKey, broadcastId, segment, exp: expNumber }, rawHexKey);
+  } catch {
+    return false;
+  }
+  const expectedBuf = Buffer.from(expected, 'hex');
+  const givenBuf = Buffer.from(token, 'hex');
+  if (expectedBuf.length !== givenBuf.length) return false;
+  return crypto.timingSafeEqual(expectedBuf, givenBuf);
+}
+
+module.exports = { encryptStreamKey, decryptStreamKey, maskStreamKey, signVodToken, verifyVodToken };

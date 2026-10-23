@@ -9,9 +9,12 @@ const {
   writeFanoutFile,
   readFanoutStatus,
   removeFanoutArtifacts,
+  writeRecordFlag,
+  removeRecordFlag,
 } = require('../lib/live');
 const { startBroadcast, stopBroadcast } = require('../lib/broadcasts');
 const { effectiveOwnerId } = require('../lib/team');
+const { getPlan, PRO_PLAN } = require('../lib/billing');
 
 function buildLiveRouter(store, { rtmpPublicUrl, whipPublicUrl, sharedDir, ownCastStreamKey }) {
   const router = express.Router();
@@ -89,7 +92,23 @@ function buildLiveRouter(store, { rtmpPublicUrl, whipPublicUrl, sharedDir, ownCa
       // signed-in user, so a team member going live shows up in - and
       // shares - the owner's one broadcast history, not a second history
       // of their own.
-      store.update((current) => startBroadcast(current, { userId: ownerId, ingestKey, destinationsArmed: armedCount }).data);
+      let broadcast;
+      store.update((current) => {
+        const result = startBroadcast(current, { userId: ownerId, ingestKey, destinationsArmed: armedCount });
+        broadcast = result.broadcast;
+        return result.data;
+      });
+      // VOD recording (Pro only, see lib/live.js writeRecordFlag) - armed
+      // by broadcast id so fanout.sh's recording leg writes a file
+      // routes/vods.js can match straight back to this history row.
+      // Always re-evaluated on every go-live, not just the first one, so
+      // a subscription that lapsed between broadcasts stops recording
+      // immediately rather than on some separate cleanup pass.
+      if (getPlan(data, ownerId) === PRO_PLAN) {
+        writeRecordFlag({ sharedDir, ingestKey, broadcastId: broadcast.id });
+      } else {
+        removeRecordFlag({ sharedDir, ingestKey });
+      }
       return res.json({ ok: true, destinationsArmed: armedCount, ingestKey });
     } catch (err) {
       console.error('vcpeer-live: failed to write fanout file:', err.message);
