@@ -3,6 +3,25 @@
 const nodemailer = require('nodemailer');
 
 /**
+ * Builds the shared Scribase Mail SMTP transporter, or null if SMTP isn't
+ * configured (local dev). Every send function below goes through this one
+ * place so host/port/auth only needs to be read from env once.
+ */
+function buildTransporter() {
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  if (!host || !user || !pass) return null;
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass },
+  });
+}
+
+/**
  * Sends the magic-link sign-in email via Scribase Mail SMTP. Host/port/
  * user/pass come from env (placeholders in .env.example - this app does
  * not talk to any real inbox during local/dev runs).
@@ -12,23 +31,13 @@ const nodemailer = require('nodemailer');
  * non-dev mode) and let the caller's dev-mode fallback take over.
  */
 async function sendMagicLinkEmail({ to, link }) {
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || 587);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
   const from = process.env.SMTP_FROM || 'VCPeer Live <live@vcpeer.com>';
-
-  if (!host || !user || !pass) {
+  const transporter = buildTransporter();
+  if (!transporter) {
     return { sent: false, reason: 'smtp_not_configured' };
   }
 
   try {
-    const transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465,
-      auth: { user, pass },
-    });
     await transporter.sendMail({
       from,
       to,
@@ -44,4 +53,39 @@ async function sendMagicLinkEmail({ to, link }) {
   }
 }
 
-module.exports = { sendMagicLinkEmail };
+/**
+ * Sends a one-shot "your stream to X died" alert. Fails soft, same as
+ * sendMagicLinkEmail - a mailer outage must never crash the health-check
+ * loop that calls this (lib/healthAlerts.js), and that loop already
+ * debounces so this is called at most once per failure episode.
+ */
+async function sendStreamFailureEmail({ to, destinationLabel, platform, lastError }) {
+  const from = process.env.SMTP_FROM || 'VCPeer Live <live@vcpeer.com>';
+  const transporter = buildTransporter();
+  if (!transporter) {
+    return { sent: false, reason: 'smtp_not_configured' };
+  }
+
+  const subject = `VCPeer Live: ${destinationLabel} stopped receiving your stream`;
+  const reasonLine = lastError ? `Last error: ${lastError}` : '';
+  try {
+    await transporter.sendMail({
+      from,
+      to,
+      subject,
+      text:
+        `Your broadcast is still live, but "${destinationLabel}" (${platform}) stopped receiving it after exhausting its retry budget. ${reasonLine}\n\n` +
+        `Check the destination's RTMP URL and stream key, then toggle it off and back on from your dashboard to re-arm it: https://live.vcpeer.com/live`,
+      html:
+        `<p>Your broadcast is still live, but <strong>${destinationLabel}</strong> (${platform}) stopped receiving it after exhausting its retry budget.</p>` +
+        (lastError ? `<p>Last error: <code>${lastError}</code></p>` : '') +
+        `<p>Check the destination's RTMP URL and stream key, then toggle it off and back on from <a href="https://live.vcpeer.com/live">your dashboard</a> to re-arm it.</p>`,
+    });
+    return { sent: true };
+  } catch (err) {
+    console.error('vcpeer-live mailer: failed to send stream failure alert:', err.message);
+    return { sent: false, reason: 'send_failed' };
+  }
+}
+
+module.exports = { sendMagicLinkEmail, sendStreamFailureEmail };
