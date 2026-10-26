@@ -5,6 +5,12 @@ the same time, plus a watch page with chat at vcpeer.com. No per-platform
 re-encode - straight passthrough fan-out. No OBS required - go live from
 the browser too.
 
+## Status
+
+No longer under active feature development by the original team — open
+sourced so others can fork, self-host, or build on it. Issues and PRs
+welcome.
+
 Composed from off-the-shelf OSS, not hand-written:
 - [Owncast](https://github.com/owncast/owncast) (MIT) - watch page, chat,
   HLS passthrough.
