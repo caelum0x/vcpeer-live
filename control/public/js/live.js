@@ -381,12 +381,16 @@
     card.style.display = 'block';
     const res = await api('/api/vods');
     if (res.status === 403) {
-      hint.textContent = 'Upgrade to Pro to automatically record every broadcast.';
-      list.innerHTML = '<div class="empty-state">No recordings - recording is a Pro feature.</div>';
+      // Dead branch as of 2026-10-27: getPlan() always returns 'pro' now
+      // (VCPeer Live is free for everyone), so routes/vods.js's requirePro
+      // never 403s. Left in place as a harmless fallback, worded for the
+      // free product rather than a paid tier.
+      hint.textContent = 'Recordings are not available right now.';
+      list.innerHTML = '<div class="empty-state">No recordings available right now.</div>';
       return;
     }
     const data = await res.json();
-    hint.textContent = 'Pro automatically records every broadcast - download or play back a past stream here.';
+    hint.textContent = 'Every broadcast is recorded automatically, free - download or play back a past stream here.';
     const recordings = data.recordings || [];
     if (!recordings.length) {
       list.innerHTML = '<div class="empty-state">No recordings yet - go live once and it will show up here.</div>';
@@ -563,7 +567,10 @@
     memberPanel.style.display = 'none';
 
     if (data.plan !== 'pro') {
-      hint.textContent = 'Upgrade to Pro to invite teammates onto your destinations.';
+      // Dead branch as of 2026-10-27: getPlan() always returns 'pro' now
+      // (VCPeer Live is free for everyone), so this never fires in
+      // production. Left in place as a harmless fallback.
+      hint.textContent = 'Team seats are not available right now.';
       ownerPanel.style.display = 'none';
       return;
     }

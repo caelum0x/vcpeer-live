@@ -66,7 +66,7 @@ function applyWebhookEvent(store, event) {
   });
 }
 
-function buildBillingRouter(store, { publicUrl }) {
+function buildBillingRouter(store) {
   const router = express.Router();
 
   router.get('/status', requireAuth(store), (req, res) => {
@@ -79,39 +79,17 @@ function buildBillingRouter(store, { publicUrl }) {
     });
   });
 
-  router.post('/checkout', requireAuth(store), async (req, res) => {
-    if (!dodo.isConfigured()) {
-      return res.status(501).json({ error: 'Billing is not configured yet.' });
-    }
-    const profile = getBillingProfile(store.get(), req.user.id);
-    if (profile && profile.plan === PRO_PLAN) {
-      return res.status(409).json({ error: 'You are already on Pro.' });
-    }
-    try {
-      const session = await dodo.createProCheckoutSession({
-        userId: req.user.id,
-        email: req.user.email,
-        returnUrl: `${publicUrl}/live?upgraded=1`,
-      });
-      return res.json({ checkoutUrl: session.checkoutUrl });
-    } catch (err) {
-      console.error('vcpeer-live billing: checkout session creation failed:', err.message);
-      return res.status(502).json({ error: 'Could not start checkout right now. Please try again shortly.' });
-    }
+  // VCPeer Live is free for everyone (owner decision 2026-10-27: VCPeer is
+  // off the paid server, no more billing). getPlan() in lib/billing.js now
+  // always returns PRO_PLAN, so there is nothing left to upgrade to and no
+  // subscription to manage - both routes are kept (not deleted) so old
+  // clients/bookmarks get a clear, honest response instead of a 404.
+  router.post('/checkout', requireAuth(store), (req, res) => {
+    return res.status(409).json({ error: 'VCPeer Live is free - every feature is already included, no upgrade needed.' });
   });
 
-  router.post('/portal', requireAuth(store), async (req, res) => {
-    const profile = getBillingProfile(store.get(), req.user.id);
-    if (!profile || !profile.dodoCustomerId) {
-      return res.status(404).json({ error: 'No billing account on file yet - upgrade to Pro first.' });
-    }
-    try {
-      const portalUrl = await dodo.createPortalLink(profile.dodoCustomerId, `${publicUrl}/live`);
-      return res.json({ portalUrl });
-    } catch (err) {
-      console.error('vcpeer-live billing: portal link creation failed:', err.message);
-      return res.status(502).json({ error: 'Could not open the billing portal right now.' });
-    }
+  router.post('/portal', requireAuth(store), (req, res) => {
+    return res.status(404).json({ error: 'VCPeer Live is free - there is no subscription to manage.' });
   });
 
   return router;

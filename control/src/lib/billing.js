@@ -3,10 +3,17 @@
 const FREE_PLAN = 'free';
 const PRO_PLAN = 'pro';
 
-/** Returns a user's plan, defaulting to free for any user created before this field existed. */
-function getPlan(data, userId) {
-  const user = data.users.find((u) => u.id === userId);
-  return (user && user.plan) || FREE_PLAN;
+/**
+ * VCPeer Live is free for everyone (owner decision 2026-10-27: VCPeer is
+ * off the paid server, no more billing). Every user's effective plan is
+ * Pro - unlimited destinations, VOD recording, and team seats - with no
+ * checkout required. `data`/`userId` are kept as parameters (unused) so
+ * every call site above this function (team.js, vods.js, live.js,
+ * routes/billing.js) is unchanged; this is the one place that grants
+ * full access.
+ */
+function getPlan(_data, _userId) {
+  return PRO_PLAN;
 }
 
 /**
